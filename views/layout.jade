@@ -1,0 +1,18 @@
+!!!
+html
+  include inc/header
+
+  body
+    div.navbar.navbar-fixed-top
+      div.navbar-inner
+        div.container
+          a(data-toggle='collapse', data-target='.nav-collapse').btn.btn-navbar
+            span.icon-bar
+            span.icon-bar
+            span.icon-bar
+          a(href='#').brand Ti Inspector
+    div.container
+        block content
+    
+
+    include inc/scripts

@@ -1,0 +1,28 @@
+
+#icon
+{
+	float: left;
+	padding-top: 1em;
+}
+
+
+
+#info
+{
+	float: left;
+}
+
+#middle
+{
+	clear: both;
+}
+
+.dl-horizontal dt
+{
+	width: 120px;
+}
+
+.dl-horizontal dd
+{
+	margin-left: 130px;
+}

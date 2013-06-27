@@ -1,0 +1,20 @@
+extends layout
+
+block content
+	h2= name
+	#icon(style="float:left")
+		img#appicon.img-rounded(src="/appicon")
+	#info
+		- if (data.length)
+			dl.dl-horizontal
+				- data.forEach(function(item){
+					dt= item.name
+					dd= item.value
+				- })
+
+	#middle.row
+		#sessions.span8
+			h4#sessions-header
+			table.table.table-hover
+				tbody#sessions-list
+		#right.span4

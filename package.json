@@ -1,0 +1,27 @@
+{
+  "name": "ti-inspector",
+  "version": "0.0.1",
+  "description": "Debug Appcelerator Titanium apps in Chrome DevTools",
+  "repository": "",
+  "keywords": [
+    "titanium",
+    "appcelerator",
+    "debugger",
+    "devtools"
+  ],
+  "author": "Olivier Morandi",
+  "license": "MIT",
+  "dependencies": {
+    "express": "3.X",
+    "underscore": "1.4.X",
+    "async": "0.1.X",
+    "websocket": "1.0.X",
+    "xml2js": "0.2.7",
+    "jade": "*",
+    "winston": "0.7.X"
+  },
+  "bin": {
+    "ti-inspector": "bin/inspector.js"
+  }
+
+}
