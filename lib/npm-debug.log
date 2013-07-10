@@ -1,0 +1,106 @@
+0 info it worked if it ends with ok
+1 verbose cli [ 'node', '/usr/local/bin/npm', 'link' ]
+2 info using npm@1.2.14
+3 info using node@v0.8.22
+4 verbose linkPkg /Users/olivier/Code/TiInspector
+5 verbose read json /Users/olivier/Code/TiInspector/package.json
+6 verbose link build target /usr/local/lib/node_modules/ti-inspector
+7 verbose install where,what [ '/Users/olivier/Code/TiInspector', [] ]
+8 verbose from cache /Users/olivier/Code/TiInspector/package.json
+9 verbose readDependencies using package.json deps
+10 verbose install where, deps [ '/Users/olivier/Code/TiInspector',
+10 verbose install   [ 'express',
+10 verbose install     'underscore',
+10 verbose install     'async',
+10 verbose install     'websocket',
+10 verbose install     'xml2js',
+10 verbose install     'jade',
+10 verbose install     'winston',
+10 verbose install     'walk' ] ]
+11 verbose from cache /Users/olivier/Code/TiInspector/package.json
+12 info preinstall ti-inspector@0.0.1
+13 verbose read json /Users/olivier/Code/TiInspector/node_modules/async/package.json
+14 verbose read json /Users/olivier/Code/TiInspector/node_modules/express/package.json
+15 verbose read json /Users/olivier/Code/TiInspector/node_modules/jade/package.json
+16 verbose read json /Users/olivier/Code/TiInspector/node_modules/underscore/package.json
+17 verbose read json /Users/olivier/Code/TiInspector/node_modules/websocket/package.json
+18 verbose read json /Users/olivier/Code/TiInspector/node_modules/winston/package.json
+19 verbose read json /Users/olivier/Code/TiInspector/node_modules/xml2js/package.json
+20 verbose from cache /Users/olivier/Code/TiInspector/package.json
+21 verbose readDependencies using package.json deps
+22 verbose from cache /Users/olivier/Code/TiInspector/node_modules/async/package.json
+23 verbose from cache /Users/olivier/Code/TiInspector/node_modules/express/package.json
+24 verbose from cache /Users/olivier/Code/TiInspector/node_modules/jade/package.json
+25 verbose from cache /Users/olivier/Code/TiInspector/node_modules/underscore/package.json
+26 verbose from cache /Users/olivier/Code/TiInspector/node_modules/websocket/package.json
+27 verbose from cache /Users/olivier/Code/TiInspector/node_modules/winston/package.json
+28 verbose from cache /Users/olivier/Code/TiInspector/node_modules/xml2js/package.json
+29 verbose already installed skipping express@3.X /Users/olivier/Code/TiInspector
+30 verbose already installed skipping underscore@1.4.X /Users/olivier/Code/TiInspector
+31 verbose already installed skipping async@0.1.X /Users/olivier/Code/TiInspector
+32 verbose already installed skipping websocket@1.0.X /Users/olivier/Code/TiInspector
+33 verbose already installed skipping xml2js@0.2.7 /Users/olivier/Code/TiInspector
+34 verbose already installed skipping jade@* /Users/olivier/Code/TiInspector
+35 verbose already installed skipping winston@0.7.X /Users/olivier/Code/TiInspector
+36 verbose cache add [ 'walk@2.3.X', null ]
+37 verbose cache add name=undefined spec="walk@2.3.X" args=["walk@2.3.X",null]
+38 verbose parsed url { pathname: 'walk@2.3.X',
+38 verbose parsed url   path: 'walk@2.3.X',
+38 verbose parsed url   href: 'walk@2.3.X' }
+39 verbose cache add name="walk" spec="2.3.X" args=["walk","2.3.X"]
+40 verbose parsed url { pathname: '2.3.X', path: '2.3.X', href: '2.3.X' }
+41 verbose addNamed [ 'walk', '2.3.X' ]
+42 verbose addNamed [ null, '>=2.3.0- <2.4.0-' ]
+43 silly lockFile 27c557c4-walk-2-3-X walk@2.3.X
+44 verbose lock walk@2.3.X /Users/olivier/.npm/27c557c4-walk-2-3-X.lock
+45 silly addNameRange { name: 'walk', range: '>=2.3.0- <2.4.0-', hasData: false }
+46 verbose url raw walk
+47 verbose url resolving [ 'https://registry.npmjs.org/', './walk' ]
+48 verbose url resolved https://registry.npmjs.org/walk
+49 info trying registry request attempt 1 at 18:01:37
+50 verbose etag "B5P5UID20SIJUWE5YU5V4TWVG"
+51 http GET https://registry.npmjs.org/walk
+52 http 200 https://registry.npmjs.org/walk
+53 silly registry.get cb [ 200,
+53 silly registry.get   { vary: 'Accept',
+53 silly registry.get     server: 'CouchDB/1.3.0 (Erlang OTP/R15B03)',
+53 silly registry.get     etag: '"BSHJ47ECLL4TFL5BUG4ROB4A5"',
+53 silly registry.get     date: 'Tue, 09 Jul 2013 16:01:41 GMT',
+53 silly registry.get     'content-type': 'application/json',
+53 silly registry.get     'content-length': '11945' } ]
+54 silly addNameRange number 2 { name: 'walk', range: '>=2.3.0- <2.4.0-', hasData: true }
+55 silly addNameRange versions [ 'walk',
+55 silly addNameRange   [ '0.9.0',
+55 silly addNameRange     '0.9.1',
+55 silly addNameRange     '0.9.2',
+55 silly addNameRange     '1.0.0',
+55 silly addNameRange     '1.0.1',
+55 silly addNameRange     '1.0.2',
+55 silly addNameRange     '1.0.4',
+55 silly addNameRange     '1.0.5',
+55 silly addNameRange     '2.0.0',
+55 silly addNameRange     '2.0.1',
+55 silly addNameRange     '2.0.2',
+55 silly addNameRange     '2.1.0',
+55 silly addNameRange     '2.1.1',
+55 silly addNameRange     '2.2.1' ] ]
+56 silly lockFile 27c557c4-walk-2-3-X walk@2.3.X
+57 silly lockFile 27c557c4-walk-2-3-X walk@2.3.X
+58 error Error: No compatible version found: walk@'>=2.3.0- <2.4.0-'
+58 error Valid install targets:
+58 error ["0.9.0","0.9.1","0.9.2","1.0.0","1.0.1","1.0.2","1.0.4","1.0.5","2.0.0","2.0.1","2.0.2","2.1.0","2.1.1","2.2.1"]
+58 error     at installTargetsError (/usr/local/lib/node_modules/npm/lib/cache.js:682:10)
+58 error     at next (/usr/local/lib/node_modules/npm/lib/cache.js:661:17)
+58 error     at /usr/local/lib/node_modules/npm/lib/cache.js:641:5
+58 error     at saved (/usr/local/lib/node_modules/npm/node_modules/npm-registry-client/lib/get.js:138:7)
+58 error     at Object.oncomplete (fs.js:297:15)
+59 error If you need help, you may report this log at:
+59 error     <http://github.com/isaacs/npm/issues>
+59 error or email it to:
+59 error     <npm-@googlegroups.com>
+60 error System Darwin 11.4.2
+61 error command "node" "/usr/local/bin/npm" "link"
+62 error cwd /Users/olivier/Code/TiInspector/lib
+63 error node -v v0.8.22
+64 error npm -v 1.2.14
+65 verbose exit [ 1, true ]

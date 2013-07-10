@@ -18,7 +18,8 @@
     "websocket": "1.0.X",
     "xml2js": "0.2.7",
     "jade": "*",
-    "winston": "0.7.X"
+    "winston": "0.7.X",
+    "walk": "2.2.X"
   },
   "bin": {
     "ti-inspector": "bin/inspector.js"
