@@ -9,6 +9,7 @@ Currently only the iOS target platform is supported. Android support requires mo
 ##Motivation
 Since my Titanium development workflow mainly revolves around Sublime Text and the CLI, and firing up Titanium Studio for tracking down bugs in the integrated debugger is most of the time a painfully slow activity (start the IDE, rebuild for debugging, etc.), I wanted a more agile way to fire up a JavaScript debug session. Moreover, when debugging native modules in Xcode, sometimes it would be nice to have a view on both sides (JS and native) of the code.
 
+You can find a more detailed post and a short demo [here](http://titaniumninja.com/debugging-titanium-apps-with-chrome-devtools/)
 
 ##Install
 
@@ -66,7 +67,4 @@ By clicking on it, the DevTools page will be open, showing the `app.js` file sou
 ![](./screenshots/debug-session.png)
 
 From there on, you can debug your application by setting breakpoints, stepping through code, watching variables, or evaluating expressions in the console panel, etc.
-
-**Note**: 
-At first only the `app.js` file will be visible in the *Sources* panel. The other files of your Titanium project will become visible only when actually `require()`d during the execution of the app. 
 
