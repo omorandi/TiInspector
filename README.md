@@ -18,7 +18,17 @@ For running Ti Inspector a working [node.js](http://nodejs.org/) setup is requir
 The Ti Inspector module can be installed through npm with
 
 ~~~
-    $ sudo npm install -g ti-inspector
+    $ [sudo] npm install -g ti-inspector
+~~~
+
+
+##Dev install
+In alternative, if you like to stay on the edge, you can pull the code from github and use `npm link`:
+
+~~~
+  $ git clone git@github.com:omorandi/TiInspector.git
+  $ cd TiInspector
+  $ [sudo] npm link
 ~~~
 
 ##Using Ti Inspector
@@ -67,4 +77,28 @@ By clicking on it, the DevTools page will be open, showing the `app.js` file sou
 ![](./screenshots/debug-session.png)
 
 From there on, you can debug your application by setting breakpoints, stepping through code, watching variables, or evaluating expressions in the console panel, etc.
+
+
+## Features
+
+* Breakpoints: setting/removing breakpoints, conditional breakpoints
+* Call stack inspection (when execution is suspended)
+* Variables and objects inspection
+* Watch expressions
+* Step operations (step over, step-into, step-out)
+* Console logging
+* Expression evaluation in the console (only when execution is suspended)
+* Suspend on exceptions (disabled by default)
+* Direct source editing and CMD-S for saving changes in your original JS files
+
+## Limitations
+
+* Android is not currently supported: supporting Android will mean implementing the [V8 remote debugging protocol](https://code.google.com/p/v8/wiki/DebuggerProtocol) in Ti Inspector. This is something I'll likely work on in the near future
+* On device debugging is not supported since it's treated in a special way by the CLI and Studio, though there exist some hackish ways for achieving the same result in a semi-manual way
+* Expressions can only be evaluated when the execution is suspended
+* TiAlloy (and any other, e.g. CoffeeScript) source mapping is not supported
+
+## License
+
+MIT
 
