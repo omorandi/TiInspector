@@ -72,7 +72,7 @@ Once the app is running in the iOS Simulator, only the splash screen will be vis
 ![](./screenshots/web-active-session.png)
 
 
-By clicking on it, the DevTools page will be open, showing the `app.js` file source code, stopped on the first executable line:
+By clicking on it, the DevTools page will be open, showing the `app.js` file source code.
 
 ![](./screenshots/debug-session.png)
 
