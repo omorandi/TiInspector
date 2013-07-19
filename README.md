@@ -94,9 +94,10 @@ From there on, you can debug your application by setting breakpoints, stepping t
 ## Limitations
 
 * Android is not currently supported: supporting Android will mean implementing the [V8 remote debugging protocol](https://code.google.com/p/v8/wiki/DebuggerProtocol) in Ti Inspector. This is something I'll likely work on in the near future
-* On device debugging is not supported since it's treated in a special way by the CLI and Studio, though there exist some hackish ways for achieving the same result in a semi-manual way
+* On device debugging is not supported since it's treated in a special way by the CLI and Studio, though there exist some hackish ways for enabling it in a semi-manual way
 * Expressions can only be evaluated when the execution is suspended
 * TiAlloy (and any other, e.g. CoffeeScript) source mapping is not supported
+* Multiple contexts (e.g. Ti.UI.Windows created through the `url` property) are not correctly handled
 
 ## License
 
