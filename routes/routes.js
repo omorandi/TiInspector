@@ -50,6 +50,15 @@ exports.index = function(req, res){
   });
 };
 
+
+exports.inspector = function(req, res){
+    if (!exports.currentSessionId) {
+      res.send(404, "Error: no active sessions");
+      return;
+    }
+    res.render('inspector');
+};
+
 exports.appicon = function(req, res) {
   var project = exports.tiProject;
 
