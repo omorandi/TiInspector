@@ -1,0 +1,11 @@
+.navigator-document-tree-item,
+button.elements,
+button.resources,
+button.network,
+button.timeline,
+button.profiles,
+button.audits,
+.sidebar-pane-stack:nth-child(6)
+{
+    display: none;
+}

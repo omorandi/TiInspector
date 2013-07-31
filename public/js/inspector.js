@@ -2,8 +2,25 @@
     if (typeof TiInspector == "undefined") {
         TiInspector = {};
     }
-        
+
+
     TiInspector.loadInspector = function loadInspector() {
+
+        function loadCssInIframe(url) {
+            if (!url) {
+                return;
+            }
+            var iframe = document.getElementById("devtools-frame");
+            $(iframe.contentDocument.head).append('<link rel="stylesheet" type="text/css" href="' + url +'">');
+        };
+
+
+        $('#devtools-frame').load(function() {
+            if (TiInspector.preferences) {
+                loadCssInIframe(TiInspector.preferences.devtools_theme);
+            }
+            loadCssInIframe('/css/inspector-overrides.css');
+        });
 
         $('#alert').modal({
             show: false,
@@ -43,15 +60,7 @@
 
         ws.onmessage = function (message) {
             var msg = JSON.parse(message.data);
-            /*
-            if (msg.message == 'backendSessions') {
-                var backendSessions = msg.data;
-                if (backendSessions.length > 0) {
-                    setDevToolsUrl(backendSessions[0].id);
-                }
-                return;
-            }
-            */
+
             if (msg.message == 'backendSessionDidStart') {
                 $('#alert').modal('hide');
                 var newSession = msg.data;

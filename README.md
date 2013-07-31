@@ -99,7 +99,28 @@ From there on, you can debug your application by setting breakpoints, stepping t
 * TiAlloy (and any other, e.g. CoffeeScript) source mapping is not supported
 * Multiple contexts (e.g. Ti.UI.Windows created through the `url` property) are not correctly handled
 
+## Themes FTW (available from V. 0.0.3)
+
+The DevTools app styling can be customized quite easily and some open source custom css are available from [http://devthemez.com/themes/chrome-developer-tools](http://devthemez.com/themes/chrome-developer-tools).
+These can also be used with Ti Inspector, which already includes some in the `public/themes/` directory.
+
+### Adding a custom Theme
+If you don't like the already available themes, you can download one from [http://devthemez.com/themes/chrome-developer-tools](http://devthemez.com/themes/chrome-developer-tools), then:
+* locate the directory where Ti Inspector has been installed by npm, which is probably `/usr/local/lib/node_modules/ti-inspector`. Let's call it `$INSTALL_DIR`
+* Copy the downloaded css file to `$INSTALL_DIR/public/themes`
+* set the `TiInspector.preferences.devtools_theme` property in the `$INSTALL_DIR/public/preferences.js`  file  accordingly
+* start Ti Inspector, or simply reload the inspector panel if already running, and enjoy your new theme
+
+
+## Changelog
+
+### 0.0.3
+
+* Automatic reload of the DevTools panel when a new debugging session is started: no need to go back and forth from the dashboard. Simply reload your app and Ti Inspector will restart
+* Basic support for Chrome DevTools custom themes (chose a theme in the `public/js/preferences.js` file and reload the web app in the browser)
+
+
 ## License
 
-MIT
+See LICENSE file
 
