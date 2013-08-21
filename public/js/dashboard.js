@@ -61,7 +61,7 @@
 
 
 
-        var ws = new WebSocket("ws://localhost:8080", "webapp");
+        var ws = new WebSocket("ws://" +  window.location.host, "webapp");
 
         var backendSessions = [];
 

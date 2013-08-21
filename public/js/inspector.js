@@ -34,7 +34,7 @@
         var activeSession = null;
 
         function devToolsUrl(sessionId) {
-            return "/inspector/devtools.html?ws=localhost:8080/devtools/page/" + sessionId;
+            return "/inspector/devtools.html?ws=" + window.location.host + "/devtools/page/" + sessionId;
         }
 
         function setDevToolsUrl(sessionId) {
@@ -43,7 +43,8 @@
             }
             activeSession = sessionId;
             var iframe = document.getElementById("devtools-frame");
-            iframe.contentWindow.location.replace(devToolsUrl(sessionId)); 
+            var url = devToolsUrl(sessionId);
+            iframe.contentWindow.location.replace(url); 
         }
 
         function changeWindowUrl(sessionId) {
@@ -56,7 +57,7 @@
 
         setDevToolsUrl(sessionId);
 
-        var ws = new WebSocket("ws://localhost:8080", "webapp");
+        var ws = new WebSocket("ws://" +  window.location.host, "webapp");
 
         ws.onmessage = function (message) {
             var msg = JSON.parse(message.data);
