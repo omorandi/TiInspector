@@ -66,6 +66,14 @@ process.argv.forEach(function (arg) {
 });
 
 
+process.on('uncaughtException', function(err) {
+    console.log('Unexpected error: ' + err.code);
+    if (err.code == 'EADDRINUSE') {
+        console.error('Is Ti Inspector already running?');
+    }
+    process.exit(1);
+});
+
 projectDir = path.resolve(projectDir);
 
 if (!projectDir) {
