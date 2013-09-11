@@ -671,3 +671,8 @@ span.cm-link { color: #845dc4 !important; }
 
 .CodeMirror-activeline-background {background: #002D57 !important;}
 .CodeMirror-matchingbracket {outline:1px solid gray;color:white !important}
+
+.section > .header::before,
+.properties-tree li.parent::before {
+  background-image: url(Images/statusbarButtonGlyphsWhite.png) !important;
+}
