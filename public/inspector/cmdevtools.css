@@ -1,5 +1,5 @@
 .CodeMirror * {
-  -webkit-box-sizing: content-box;
+  box-sizing: content-box;
 }
 
 .CodeMirror {
@@ -25,6 +25,9 @@
   margin-left: -1px;
 }
 
+.CodeMirror-readonly .CodeMirror-cursor {
+    display: none;
+}
 
 .CodeMirror-linenumber {
   min-width: 22px !important;
@@ -54,13 +57,13 @@
 }
 
 @media (-webkit-min-device-pixel-ratio: 1.5) {
-  .cm-breakpoint .CodeMirror-linenumber {
-    -webkit-border-image: url(Images/breakpoint2_2x.png) 2 8 2 2;
-  }
-  .cm-breakpoint.cm-breakpoint-conditional .CodeMirror-linenumber {
-    -webkit-border-image: url(Images/breakpointConditional2_2x.png) 2 8 2 2;
-  }
+.cm-breakpoint .CodeMirror-linenumber {
+  -webkit-border-image: url(Images/breakpoint2_2x.png) 2 8 2 2;
 }
+.cm-breakpoint.cm-breakpoint-conditional .CodeMirror-linenumber {
+  -webkit-border-image: url(Images/breakpointConditional2_2x.png) 2 8 2 2;
+}
+} /* media */
 
 .cm-breakpoint-disabled .CodeMirror-linenumber {
   opacity: 0.5;
@@ -73,6 +76,27 @@
 
 .CodeMirror-nonmatchingbracket {
   color: #222 !important;
+}
+
+.cm-whitespace::before {
+    position: absolute;
+    pointer-events: none;
+    color: rgb(175, 175, 175);
+}
+
+.cm-tab {
+    position: relative;
+}
+
+.cm-tab:before {
+    display: none;
+    content: ".";
+    color: transparent;
+    border-bottom: 1px solid rgb(175, 175, 175);
+    position: absolute;
+    width: 90%;
+    bottom: 50%;
+    left: 5%;
 }
 
 .cm-execution-line {
@@ -112,12 +136,14 @@
 .cm-s-web-inspector-css span.cm-keyword { color: rgb(7, 144, 154);}
 .cm-s-web-inspector-css span.cm-number {color: rgb(50, 0, 255);}
 .cm-s-web-inspector-css span.cm-comment {color: rgb(0, 116, 0);}
+.cm-s-web-inspector-css span.cm-def {color: rgb(200, 0, 0);}
 .cm-s-web-inspector-css span.cm-meta {color: rgb(200, 0, 0);}
 .cm-s-web-inspector-css span.cm-atom {color: rgb(7, 144, 154);}
 .cm-s-web-inspector-css span.cm-string {color: rgb(7, 144, 154);}
 .cm-s-web-inspector-css span.cm-string-2 {color: rgb(7, 144, 154);}
 .cm-s-web-inspector-css span.cm-link {color: rgb(7, 144, 154);}
 .cm-s-web-inspector-css span.cm-variable {color: rgb(200, 0, 0);}
+.cm-s-web-inspector-css span.cm-variable-2 {color: rgb(0, 0, 128);}
 .cm-s-web-inspector-css span.cm-property {color: rgb(200, 0, 0);}
 
 .cm-s-web-inspector-html span.cm-meta {color: rgb(192, 192, 192);}
@@ -128,8 +154,8 @@
 .cm-s-web-inspector-html span.cm-link {color: #00e;}
 
 .CodeMirror .webkit-html-message-bubble {
-    -webkit-box-shadow: black 0px 2px 5px;
-    -webkit-border-radius: 9px;
+    box-shadow: black 0px 2px 5px;
+    border-radius: 9px;
     -webkit-border-fit: lines;
     font-size: 10px;
     font-family: Lucida Grande, sans-serif;

@@ -459,6 +459,7 @@ this._createCategory(WebInspector.UIString("Load"), true, ["load", "unload", "ab
 this._createCategory(WebInspector.UIString("Mouse"), true, ["click", "dblclick", "mousedown", "mouseup", "mouseover", "mousemove", "mouseout", "mousewheel"]);
 this._createCategory(WebInspector.UIString("Timer"), false, ["setTimer", "clearTimer", "timerFired"]);
 this._createCategory(WebInspector.UIString("Touch"), true, ["touchstart", "touchmove", "touchend", "touchcancel"]);
+this._createCategory(WebInspector.UIString("WebGL"), false, ["webglErrorFired"]);
 
 this._restoreBreakpoints();
 }
@@ -466,7 +467,8 @@ this._restoreBreakpoints();
 WebInspector.EventListenerBreakpointsSidebarPane.categotyListener = "listener:";
 WebInspector.EventListenerBreakpointsSidebarPane.categotyInstrumentation = "instrumentation:";
 
-WebInspector.EventListenerBreakpointsSidebarPane.eventNameForUI = function(eventName)
+
+WebInspector.EventListenerBreakpointsSidebarPane.eventNameForUI = function(eventName, auxData)
 {
 if (!WebInspector.EventListenerBreakpointsSidebarPane._eventNamesForUI) {
 WebInspector.EventListenerBreakpointsSidebarPane._eventNamesForUI = {
@@ -475,8 +477,17 @@ WebInspector.EventListenerBreakpointsSidebarPane._eventNamesForUI = {
 "instrumentation:timerFired": WebInspector.UIString("Timer Fired"),
 "instrumentation:requestAnimationFrame": WebInspector.UIString("Request Animation Frame"),
 "instrumentation:cancelAnimationFrame": WebInspector.UIString("Cancel Animation Frame"),
-"instrumentation:animationFrameFired": WebInspector.UIString("Animation Frame Fired")
+"instrumentation:animationFrameFired": WebInspector.UIString("Animation Frame Fired"),
+"instrumentation:webglErrorFired": WebInspector.UIString("WebGL Error Fired")
 };
+}
+if (auxData) {
+if (eventName === "instrumentation:webglErrorFired" && auxData["webglErrorName"]) {
+var errorName = auxData["webglErrorName"];
+
+errorName = errorName.replace(/^.*(0x[0-9a-f]+).*$/i, "$1");
+return WebInspector.UIString("WebGL Error Fired (%s)", errorName);
+}
 }
 return WebInspector.EventListenerBreakpointsSidebarPane._eventNamesForUI[eventName] || eventName.substring(eventName.indexOf(":") + 1);
 }
@@ -505,7 +516,7 @@ var hitMarker = document.createElement("div");
 hitMarker.className = "breakpoint-hit-marker";
 breakpointItem.element.listItemElement.appendChild(hitMarker);
 breakpointItem.element.listItemElement.addStyleClass("source-code");
-breakpointItem.element.selectable = true;
+breakpointItem.element.selectable = false;
 
 breakpointItem.checkbox = this._createCheckbox(breakpointItem.element);
 breakpointItem.checkbox.addEventListener("click", this._breakpointCheckboxClicked.bind(this, eventName), true);
@@ -828,8 +839,6 @@ this._promptElement.addEventListener("input", this._onInput.bind(this), false);
 this._promptElement.type = "text";
 this._promptElement.setAttribute("spellcheck", "false");
 
-this._progressElement = this.element.createChild("div", "progress");
-
 this._filteredItems = [];
 this._viewportControl = new WebInspector.ViewportControl(this);
 this._itemElementsContainer = this._viewportControl.element;
@@ -839,7 +848,24 @@ this._itemElementsContainer.addEventListener("click", this._onClick.bind(this), 
 this.element.appendChild(this._itemElementsContainer);
 
 this._delegate = delegate;
-this._delegate.requestItems(this._itemsLoaded.bind(this));
+this._delegate.setRefreshCallback(this._itemsLoaded.bind(this));
+this._itemsLoaded();
+}
+
+
+WebInspector.FilteredItemSelectionDialog._createSearchRegex = function(query)
+{
+const toEscape = String.regexSpecialCharacters();
+var regexString = "";
+for (var i = 0; i < query.length; ++i) {
+var c = query.charAt(i);
+if (toEscape.indexOf(c) !== -1)
+c = "\\" + c;
+if (i)
+regexString += "[^" + c + "]*";
+regexString += c;
+}
+return new RegExp(regexString, "i");
 }
 
 WebInspector.FilteredItemSelectionDialog.prototype = {
@@ -884,33 +910,23 @@ this._renderAsTwoRows = true;
 
 onEnter: function()
 {
-if (!this._delegate.itemsCount())
+if (!this._delegate.itemCount())
 return;
 this._delegate.selectItem(this._filteredItems[this._selectedIndexInFiltered], this._promptElement.value.trim());
 },
 
-
-_itemsLoaded: function(loadedCount, totalCount)
+_itemsLoaded: function()
 {
-this._loadedCount = loadedCount;
-this._totalCount = totalCount;
 
 if (this._loadTimeout)
 return;
-this._loadTimeout = setTimeout(this._updateAfterItemsLoaded.bind(this), 100);
+this._loadTimeout = setTimeout(this._updateAfterItemsLoaded.bind(this), 0);
 },
 
 _updateAfterItemsLoaded: function()
 {
 delete this._loadTimeout;
 this._filterItems();
-if (this._loadedCount === this._totalCount)
-this._progressElement.style.backgroundImage = "";
-else {
-const color = "rgb(66, 129, 235)";
-const percent = ((this._loadedCount / this._totalCount) * 100) + "%";
-this._progressElement.style.backgroundImage = "-webkit-linear-gradient(left, " + color + ", " + color + " " + percent + ",  transparent " + percent + ")";
-}
 },
 
 
@@ -919,62 +935,12 @@ _createItemElement: function(index)
 var itemElement = document.createElement("div");
 itemElement.className = "filtered-item-list-dialog-item " + (this._renderAsTwoRows ? "two-rows" : "one-row");
 itemElement._titleElement = itemElement.createChild("span");
-itemElement._titleElement.textContent = this._delegate.itemTitleAt(index);
 itemElement._titleSuffixElement = itemElement.createChild("span");
-itemElement._titleSuffixElement.textContent = this._delegate.itemSuffixAt(index);
 itemElement._subtitleElement = itemElement.createChild("div", "filtered-item-list-dialog-subtitle");
-itemElement._subtitleElement.textContent = this._delegate.itemSubtitleAt(index) || "\u200B";
+itemElement._subtitleElement.textContent = "\u200B";
 itemElement._index = index;
-
-var key = this._delegate.itemKeyAt(index);
-var ranges = [];
-var match;
-if (this._query) {
-var regex = this._createSearchRegex(this._query, true);
-while ((match = regex.exec(key)) !== null && match[0])
-ranges.push({ offset: match.index, length: regex.lastIndex - match.index });
-if (ranges.length)
-WebInspector.highlightRangesWithStyleClass(itemElement, ranges, "highlight");
-}
-if (index === this._filteredItems[this._selectedIndexInFiltered])
-itemElement.addStyleClass("selected");
-
+this._delegate.renderItem(index, this._promptElement.value.trim(), itemElement._titleElement, itemElement._subtitleElement);
 return itemElement;
-},
-
-
-_createSearchRegex: function(query, isGlobal)
-{
-const toEscape = String.regexSpecialCharacters();
-var regexString = "";
-for (var i = 0; i < query.length; ++i) {
-var c = query.charAt(i);
-if (toEscape.indexOf(c) !== -1)
-c = "\\" + c;
-if (i)
-regexString += "[^" + c + "]*";
-regexString += c;
-}
-return new RegExp(regexString, "i" + (isGlobal ? "g" : ""));
-},
-
-
-_createScoringRegex: function(query, ignoreCase, camelCase)
-{
-if (!camelCase || (camelCase && ignoreCase))
-query = query.toUpperCase();
-var regexString = "";
-for (var i = 0; i < query.length; ++i) {
-var c = query.charAt(i);
-if (c < "A" || c > "Z")
-continue;
-if (regexString)
-regexString += camelCase ? "[^A-Z]*" : "[^-_ .]*[-_ .]";
-regexString += c;
-}
-if (!camelCase)
-regexString = "(?:^|[-_ .])" + regexString;
-return new RegExp(regexString, camelCase ? "" : "i");
 },
 
 
@@ -987,70 +953,71 @@ this._scheduleFilter();
 _filterItems: function()
 {
 delete this._filterTimer;
+if (this._scoringTimer) {
+clearTimeout(this._scoringTimer);
+delete this._scoringTimer;
+}
 
 var query = this._delegate.rewriteQuery(this._promptElement.value.trim());
 this._query = query;
-
-var ignoreCase = (query === query.toLowerCase());
-
-var filterRegex = query ? this._createSearchRegex(query) : null;
-var camelCaseScoringRegex = query ? this._createScoringRegex(query, ignoreCase, true) : null;
-var underscoreScoringRegex = query ? this._createScoringRegex(query, ignoreCase, false) : null;
+var queryLength = query.length;
+var filterRegex = query ? WebInspector.FilteredItemSelectionDialog._createSearchRegex(query) : null;
 
 var oldSelectedAbsoluteIndex = this._selectedIndexInFiltered ? this._filteredItems[this._selectedIndexInFiltered] : null;
-this._filteredItems = [];
+var filteredItems = [];
 this._selectedIndexInFiltered = 0;
 
-var cachedKeys = new Array(this._delegate.itemsCount());
-var scores = query ? new Array(this._delegate.itemsCount()) : null;
+var bestScores = [];
+var bestItems = [];
+var bestItemsToCollect = 100;
+var minBestScore = 0;
+var overflowItems = [];
 
-for (var i = 0; i < this._delegate.itemsCount(); ++i) {
-var key = this._delegate.itemKeyAt(i);
-if (filterRegex && !filterRegex.test(key))
-continue;
-cachedKeys[i] = key;
-this._filteredItems.push(i);
+scoreItems.call(this, 0);
 
-if (!filterRegex)
-continue;
-
-var score = 0;
-if (underscoreScoringRegex.test(key))
-score += 10;
-if (camelCaseScoringRegex.test(key))
-score += ignoreCase ? 10 : 20;
-for (var j = 0; j < key.length && j < query.length; ++j) {
-if (key[j] === query[j])
-score++;
-if (key[j].toUpperCase() === query[j].toUpperCase())
-score++;
-else
-break;
-}
-scores[i] = score;
-}
-
-function compareFunction(index1, index2)
+function compareIntegers(a, b)
 {
-if (scores) {
-var score1 = scores[index1];
-var score2 = scores[index2];
-if (score1 > score2)
-return -1;
-if (score1 < score2)
-return 1;
-}
-var key1 = cachedKeys[index1];
-var key2 = cachedKeys[index2];
-return key1.compareTo(key2) || (index2 - index1);
+return   (b) -   (a);
 }
 
-const numberOfItemsToSort = 100;
-if (this._filteredItems.length > numberOfItemsToSort)
-this._filteredItems.sortRange(compareFunction.bind(this), 0, this._filteredItems.length - 1, numberOfItemsToSort);
-else
-this._filteredItems.sort(compareFunction.bind(this));
+function scoreItems(fromIndex)
+{
+var maxWorkItems = 1000;
+var workDone = 0;
+for (var i = fromIndex; i < this._delegate.itemCount() && workDone < maxWorkItems; ++i) {
 
+if (filterRegex && !filterRegex.test(this._delegate.itemKeyAt(i)))
+continue;
+
+
+var score = this._delegate.itemScoreAt(i, query);
+if (query)
+workDone++;
+
+
+if (score > minBestScore || bestScores.length < bestItemsToCollect) {
+var index = insertionIndexForObjectInListSortedByFunction(score, bestScores, compareIntegers, true);
+bestScores.splice(index, 0, score);
+bestItems.splice(index, 0, i);
+if (bestScores.length > bestItemsToCollect) {
+
+overflowItems.push(bestItems.peekLast());
+bestScores.length = bestItemsToCollect;
+bestItems.length = bestItemsToCollect;
+}
+minBestScore =   (bestScores.peekLast());
+} else
+filteredItems.push(i);
+}
+
+
+if (i < this._delegate.itemCount()) {
+this._scoringTimer = setTimeout(scoreItems.bind(this, i), 0);
+return;
+}
+delete this._scoringTimer;
+
+this._filteredItems = bestItems.concat(overflowItems).concat(filteredItems);
 for (var i = 0; i < this._filteredItems.length; ++i) {
 if (this._filteredItems[i] === oldSelectedAbsoluteIndex) {
 this._selectedIndexInFiltered = i;
@@ -1061,6 +1028,7 @@ this._viewportControl.refresh();
 if (!query)
 this._selectedIndexInFiltered = 0;
 this._updateSelection(this._selectedIndexInFiltered, false);
+}
 },
 
 _onInput: function(event)
@@ -1138,9 +1106,7 @@ return this._filteredItems.length;
 itemElement: function(index)
 {
 var delegateIndex = this._filteredItems[index];
-var element = this._createItemElement(delegateIndex);
-element._filteredIndex = index;
-return element;
+return this._createItemElement(delegateIndex);
 },
 
 __proto__: WebInspector.DialogDelegate.prototype
@@ -1153,121 +1119,76 @@ WebInspector.SelectionDialogContentProvider = function()
 
 WebInspector.SelectionDialogContentProvider.prototype = {
 
-itemTitleAt: function(itemIndex) { },
-
-
-itemSuffixAt: function(itemIndex) { },
-
-
-itemSubtitleAt: function(itemIndex) { },
-
-
-itemKeyAt: function(itemIndex) { },
-
-
-itemsCount: function() { },
-
-
-requestItems: function(callback) { },
-
-
-selectItem: function(itemIndex, promptValue) { },
-
-
-rewriteQuery: function(query) { },
-
-dispose: function() { }
-}
-
-
-WebInspector.JavaScriptOutlineDialog = function(view, contentProvider)
+setRefreshCallback: function(refreshCallback)
 {
-WebInspector.SelectionDialogContentProvider.call(this);
-
-this._functionItems = [];
-this._view = view;
-this._contentProvider = contentProvider;
-}
-
-
-WebInspector.JavaScriptOutlineDialog.show = function(view, contentProvider)
-{
-if (WebInspector.Dialog.currentInstance())
-return null;
-var delegate = new WebInspector.JavaScriptOutlineDialog(view, contentProvider);
-var filteredItemSelectionDialog = new WebInspector.FilteredItemSelectionDialog(delegate);
-WebInspector.Dialog.show(view.element, filteredItemSelectionDialog);
-}
-
-WebInspector.JavaScriptOutlineDialog.prototype = {
-
-itemTitleAt: function(itemIndex)
-{
-var functionItem = this._functionItems[itemIndex];
-return functionItem.name + (functionItem.arguments ? functionItem.arguments : "");
+this._refreshCallback = refreshCallback;
 },
 
 
-itemSuffixAt: function(itemIndex)
+itemCount: function()
 {
-return "";
-},
-
-
-itemSubtitleAt: function(itemIndex)
-{
-return ":" + (this._functionItems[itemIndex].line + 1);
+return 0;
 },
 
 
 itemKeyAt: function(itemIndex)
 {
-return this._functionItems[itemIndex].name;
+return "";
 },
 
 
-itemsCount: function()
+itemScoreAt: function(itemIndex, query)
 {
-return this._functionItems.length;
+return 1;
 },
 
 
-requestItems: function(callback)
+renderItem: function(itemIndex, query, titleElement, subtitleElement)
 {
+},
 
-function contentCallback(content, contentEncoded, mimeType)
+
+highlightRanges: function(element, query)
 {
-if (this._outlineWorker)
-this._outlineWorker.terminate();
-this._outlineWorker = new Worker("ScriptFormatterWorker.js");
-this._outlineWorker.onmessage = this._didBuildOutlineChunk.bind(this, callback);
-const method = "outline";
-this._outlineWorker.postMessage({ method: method, params: { content: content } });
+if (!query)
+return false;
+
+
+function rangesForMatch(text, query)
+{
+var sm = new difflib.SequenceMatcher(query, text);
+var opcodes = sm.get_opcodes();
+var ranges = [];
+
+for (var i = 0; i < opcodes.length; ++i) {
+var opcode = opcodes[i];
+if (opcode[0] === "equal")
+ranges.push({offset: opcode[3], length: opcode[4] - opcode[3]});
+else if (opcode[0] !== "insert")
+return null;
 }
-this._contentProvider.requestContent(contentCallback.bind(this));
-},
-
-_didBuildOutlineChunk: function(callback, event)
-{
-var data = event.data;
-var chunk = data["chunk"];
-for (var i = 0; i < chunk.length; ++i)
-this._functionItems.push(chunk[i]);
-callback(data.index, data.total);
-
-if (data.total === data.index && this._outlineWorker) {
-this._outlineWorker.terminate();
-delete this._outlineWorker;
+return ranges;
 }
+
+var text = element.textContent;
+var ranges = rangesForMatch(text, query);
+if (!ranges)
+ranges = rangesForMatch(text.toUpperCase(), query.toUpperCase());
+if (ranges) {
+WebInspector.highlightRangesWithStyleClass(element, ranges, "highlight");
+return true;
+}
+return false;
 },
 
 
 selectItem: function(itemIndex, promptValue)
 {
-var lineNumber = this._functionItems[itemIndex].line;
-if (!isNaN(lineNumber) && lineNumber >= 0)
-this._view.highlightLine(lineNumber);
-this._view.focus();
+},
+
+refresh: function()
+{
+this._refreshCallback();
 },
 
 
@@ -1282,13 +1203,106 @@ dispose: function()
 }
 
 
-WebInspector.SelectUISourceCodeDialog = function()
+WebInspector.JavaScriptOutlineDialog = function(view, contentProvider)
 {
-var projects = WebInspector.workspace.projects().filter(this.filterProject.bind(this));
+WebInspector.SelectionDialogContentProvider.call(this);
+
+this._functionItems = [];
+this._view = view;
+contentProvider.requestContent(this._contentAvailable.bind(this));
+}
+
+
+WebInspector.JavaScriptOutlineDialog.show = function(view, contentProvider)
+{
+if (WebInspector.Dialog.currentInstance())
+return null;
+var filteredItemSelectionDialog = new WebInspector.FilteredItemSelectionDialog(new WebInspector.JavaScriptOutlineDialog(view, contentProvider));
+WebInspector.Dialog.show(view.element, filteredItemSelectionDialog);
+}
+
+WebInspector.JavaScriptOutlineDialog.prototype = {
+
+_contentAvailable: function(content, contentEncoded, mimeType)
+{
+this._outlineWorker = new Worker("ScriptFormatterWorker.js");
+this._outlineWorker.onmessage = this._didBuildOutlineChunk.bind(this);
+const method = "outline";
+this._outlineWorker.postMessage({ method: method, params: { content: content } });
+},
+
+_didBuildOutlineChunk: function(event)
+{
+var data = event.data;
+var chunk = data["chunk"];
+for (var i = 0; i < chunk.length; ++i)
+this._functionItems.push(chunk[i]);
+
+if (data.total === data.index)
+this.dispose();
+
+this.refresh();
+},
+
+
+itemCount: function()
+{
+return this._functionItems.length;
+},
+
+
+itemKeyAt: function(itemIndex)
+{
+return this._functionItems[itemIndex].name;
+},
+
+
+itemScoreAt: function(itemIndex, query)
+{
+var item = this._functionItems[itemIndex];
+return -item.line;
+},
+
+
+renderItem: function(itemIndex, query, titleElement, subtitleElement)
+{
+var item = this._functionItems[itemIndex];
+titleElement.textContent = item.name + (item.arguments ? item.arguments : "");
+this.highlightRanges(titleElement, query);
+subtitleElement.textContent = ":" + (item.line + 1);
+},
+
+
+selectItem: function(itemIndex, promptValue)
+{
+var lineNumber = this._functionItems[itemIndex].line;
+if (!isNaN(lineNumber) && lineNumber >= 0)
+this._view.highlightPosition(lineNumber, this._functionItems[itemIndex].column);
+this._view.focus();
+},
+
+dispose: function()
+{
+if (this._outlineWorker) {
+this._outlineWorker.terminate();
+delete this._outlineWorker;
+}
+},
+
+__proto__: WebInspector.SelectionDialogContentProvider.prototype
+}
+
+
+WebInspector.SelectUISourceCodeDialog = function(defaultScores)
+{
+WebInspector.SelectionDialogContentProvider.call(this);
+
 this._uiSourceCodes = [];
+var projects = WebInspector.workspace.projects().filter(this.filterProject.bind(this));
 for (var i = 0; i < projects.length; ++i)
 this._uiSourceCodes = this._uiSourceCodes.concat(projects[i].uiSourceCodes().filter(this.filterUISourceCode.bind(this)));
-WebInspector.workspace.addEventListener(WebInspector.UISourceCodeProvider.Events.UISourceCodeAdded, this._uiSourceCodeAdded, this);
+this._defaultScores = defaultScores;
+WebInspector.workspace.addEventListener(WebInspector.Workspace.Events.UISourceCodeAdded, this._uiSourceCodeAdded, this);
 }
 
 WebInspector.SelectUISourceCodeDialog.prototype = {
@@ -1312,45 +1326,134 @@ return uiSourceCode.name();
 },
 
 
-itemTitleAt: function(itemIndex)
-{
-return this._uiSourceCodes[itemIndex].name().trimEnd(100);
-},
-
-
-itemSuffixAt: function(itemIndex)
-{
-return this._queryLineNumber || "";
-},
-
-
-itemSubtitleAt: function(itemIndex)
-{
-var uiSourceCode = this._uiSourceCodes[itemIndex]
-var projectName = uiSourceCode.project().displayName();
-var path = uiSourceCode.path().slice();
-path.pop();
-path.unshift(projectName);
-return path.join("/");
-},
-
-
-itemKeyAt: function(itemIndex)
-{
-return this._uiSourceCodes[itemIndex].name();
-},
-
-
-itemsCount: function()
+itemCount: function()
 {
 return this._uiSourceCodes.length;
 },
 
 
-requestItems: function(callback)
+itemKeyAt: function(itemIndex)
 {
-this._itemsLoaded = callback;
-this._itemsLoaded(1, 1);
+return this._uiSourceCodes[itemIndex].fullName();
+},
+
+
+itemScoreAt: function(itemIndex, query)
+{
+var uiSourceCode = this._uiSourceCodes[itemIndex];
+var score = this._defaultScores ? (this._defaultScores.get(uiSourceCode) || 0) : 0;
+if (!query || query.length < 2)
+return score;
+
+if (this._query !== query) {
+this._query = query;
+this._queryToUpperCase = query.toUpperCase();
+this._ignoreCase = query === this._queryToUpperCase;
+this._filterRegex = WebInspector.FilteredItemSelectionDialog._createSearchRegex(query);
+}
+
+var path = uiSourceCode.fullName();
+return score + 10 * this._scoreTokens(path, this._queryToUpperCase, null);
+},
+
+
+_scoreTokens: function(path, queryToUpperCase, matchIndexes)
+{
+var pathLength = path.length;
+var queryLength = queryToUpperCase.length;
+var indexOfLastSlash = path.lastIndexOf("/");
+var totalLength = pathLength * queryLength;
+var dynamics = new Array(totalLength * 2);
+
+
+function score(pathIndex, queryIndex, previousWasAMatch, indexes)
+{
+var key = pathIndex * queryLength + queryIndex + (previousWasAMatch ? queryLength * pathLength : 0);
+if (!indexes && key in dynamics)
+return dynamics[key];
+
+if (queryIndex >= queryLength)
+return 0;
+
+var match = -1;
+var queryChar = queryToUpperCase[queryIndex];
+while (match === -1 && pathIndex < path.length) {
+var pathChar = path[pathIndex];
+var prevPathChar = path[pathIndex - 1];
+if ((!prevPathChar || prevPathChar === "/") && pathChar.toUpperCase() === queryChar)
+match = 2; 
+else if ((prevPathChar === "_" || prevPathChar === "-") && pathChar.toUpperCase() === queryChar)
+match = 1; 
+else if (previousWasAMatch && pathChar.toUpperCase() === queryChar)
+match = 3; 
+else if (pathChar === queryChar)
+match = 1; 
+else if (pathChar.toUpperCase() === queryChar)
+match = 0; 
+else
+pathIndex++;
+previousWasAMatch = false;
+}
+
+if (pathIndex >= path.length) {
+dynamics[key] = -1;
+return -1;
+}
+
+
+if (pathIndex > indexOfLastSlash)
+match *= 2;
+
+
+var useIndexes = matchIndexes ? [] : null;
+var useScore = score(pathIndex + 1, queryIndex + 1, match > 0, useIndexes);
+if (useScore >= 0)
+useScore += match;
+
+var skipIndexes = matchIndexes ? [] : null;
+var skipScore = score(pathIndex + 1, queryIndex, false, skipIndexes);
+
+var maxScore = Math.max(skipScore, useScore);
+dynamics[key] = maxScore;
+
+if (matchIndexes) {
+indexes.length = 0;
+if (skipScore > useScore)
+indexes.push.apply(indexes, skipIndexes);
+else {
+indexes.push(pathIndex);
+indexes.push.apply(indexes, useIndexes);
+}
+}
+return maxScore;
+}
+return score(0, 0, false, matchIndexes);
+},
+
+
+renderItem: function(itemIndex, query, titleElement, subtitleElement)
+{
+query = this.rewriteQuery(query);
+var uiSourceCode = this._uiSourceCodes[itemIndex];
+titleElement.textContent = uiSourceCode.name().trimEnd(100) + (this._queryLineNumber ? this._queryLineNumber : "");
+subtitleElement.textContent = uiSourceCode.fullName();
+
+function highlightMatchingScores(element)
+{
+var indexes = [];
+var score = this._scoreTokens(element.textContent, query.toUpperCase(), indexes);
+if (score > 0) {
+var ranges = [];
+for (var i = 0; i < indexes.length; ++i)
+ranges.push({offset: indexes[i], length: 1});
+return WebInspector.highlightRangesWithStyleClass(element, ranges, "highlight");
+}
+return this.highlightRanges(element, query);
+}
+if (query) {
+if (!highlightMatchingScores.call(this, titleElement))
+highlightMatchingScores.call(this, subtitleElement);
+}
 },
 
 
@@ -1379,19 +1482,21 @@ var uiSourceCode =   (event.data);
 if (!this.filterUISourceCode(uiSourceCode))
 return;
 this._uiSourceCodes.push(uiSourceCode)
-this._itemsLoaded(1, 1);
+this.refresh();
 },
 
 dispose: function()
 {
-WebInspector.workspace.removeEventListener(WebInspector.UISourceCodeProvider.Events.UISourceCodeAdded, this._uiSourceCodeAdded, this);
-}
+WebInspector.workspace.removeEventListener(WebInspector.Workspace.Events.UISourceCodeAdded, this._uiSourceCodeAdded, this);
+},
+
+__proto__: WebInspector.SelectionDialogContentProvider.prototype
 }
 
 
-WebInspector.OpenResourceDialog = function(panel)
+WebInspector.OpenResourceDialog = function(panel, defaultScores)
 {
-WebInspector.SelectUISourceCodeDialog.call(this);
+WebInspector.SelectUISourceCodeDialog.call(this, defaultScores);
 this._panel = panel;
 }
 
@@ -1413,12 +1518,12 @@ __proto__: WebInspector.SelectUISourceCodeDialog.prototype
 }
 
 
-WebInspector.OpenResourceDialog.show = function(panel, relativeToElement, name)
+WebInspector.OpenResourceDialog.show = function(panel, relativeToElement, name, defaultScores)
 {
 if (WebInspector.Dialog.currentInstance())
 return;
 
-var filteredItemSelectionDialog = new WebInspector.FilteredItemSelectionDialog(new WebInspector.OpenResourceDialog(panel));
+var filteredItemSelectionDialog = new WebInspector.FilteredItemSelectionDialog(new WebInspector.OpenResourceDialog(panel, defaultScores));
 filteredItemSelectionDialog.renderAsTwoRows();
 if (name)
 filteredItemSelectionDialog.setQuery(name);
@@ -1468,6 +1573,9 @@ WebInspector.UISourceCodeFrame = function(uiSourceCode)
 {
 this._uiSourceCode = uiSourceCode;
 WebInspector.SourceFrame.call(this, this._uiSourceCode);
+if (WebInspector.experimentsSettings.textEditorAutocomplete.isEnabled())
+this.textEditor.setCompletionDictionary(new WebInspector.SampleCompletionDictionary());
+
 this._uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.FormattedChanged, this._onFormattedChanged, this);
 this._uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.WorkingCopyChanged, this._onWorkingCopyChanged, this);
 this._uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.WorkingCopyCommitted, this._onWorkingCopyCommitted, this);
@@ -1487,6 +1595,7 @@ willHide: function()
 WebInspector.SourceFrame.prototype.willHide.call(this);
 window.removeEventListener("focus", this._boundWindowFocused, false);
 delete this._boundWindowFocused;
+this._uiSourceCode.removeWorkingCopyGetter();
 },
 
 
@@ -1527,7 +1636,7 @@ this._muteSourceCodeEvents = true;
 if (this._textEditor.isClean())
 this._uiSourceCode.resetWorkingCopy();
 else
-this._uiSourceCode.setWorkingCopy(this._textEditor.text());
+this._uiSourceCode.setWorkingCopyGetter(this._textEditor.text.bind(this._textEditor));
 delete this._muteSourceCodeEvents;
 },
 
@@ -1623,10 +1732,27 @@ this._uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.SourceMappi
 this._uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.WorkingCopyChanged, this._workingCopyChanged, this);
 this._uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.WorkingCopyCommitted, this._workingCopyCommitted, this);
 
+this._registerShortcuts();
 this._updateScriptFile();
 }
 
 WebInspector.JavaScriptSourceFrame.prototype = {
+_registerShortcuts: function()
+{
+var modifiers = WebInspector.KeyboardShortcut.Modifiers;
+this.addShortcut(WebInspector.KeyboardShortcut.makeKey("e", modifiers.Shift | modifiers.Ctrl), this._evaluateSelectionInConsole.bind(this));
+},
+
+
+_evaluateSelectionInConsole: function(event)
+{
+var selection = this.textEditor.selection();
+if (!selection || selection.isEmpty())
+return false;
+WebInspector.evaluateInConsole(this.textEditor.copyRange(selection));
+return true;
+},
+
 
 wasShown: function()
 {
@@ -1667,12 +1793,13 @@ contextMenu.appendItem(WebInspector.UIString(WebInspector.useLowerCaseMenuTitles
 
 populateTextAreaContextMenu: function(contextMenu, lineNumber)
 {
-var selection = window.getSelection();
-if (selection.type === "Range" && !selection.isCollapsed) {
+var textSelection = this.textEditor.selection();
+if (textSelection && !textSelection.isEmpty()) {
+var selection = this.textEditor.copyRange(textSelection);
 var addToWatchLabel = WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Add to watch" : "Add to Watch");
-contextMenu.appendItem(addToWatchLabel, this._scriptsPanel.addToWatch.bind(this._scriptsPanel, selection.toString()));
+contextMenu.appendItem(addToWatchLabel, this._scriptsPanel.addToWatch.bind(this._scriptsPanel, selection));
 var evaluateLabel = WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Evaluate in console" : "Evaluate in Console");
-contextMenu.appendItem(evaluateLabel, WebInspector.evaluateInConsole.bind(WebInspector, selection.toString()));
+contextMenu.appendItem(evaluateLabel, WebInspector.evaluateInConsole.bind(WebInspector, selection));
 contextMenu.appendSeparator();
 } else if (!this._uiSourceCode.isEditable() && this._uiSourceCode.contentType() === WebInspector.resourceTypes.Script) {
 function liveEdit(event)
@@ -1778,12 +1905,28 @@ _getPopoverAnchor: function(element, event)
 {
 if (!WebInspector.debuggerModel.isPaused())
 return null;
-if (window.getSelection().type === "Range")
-return null;
 
 var textPosition = this.textEditor.coordinatesToCursorPosition(event.x, event.y);
 if (!textPosition)
 return null;
+var mouseLine = textPosition.startLine;
+var mouseColumn = textPosition.startColumn;
+var textSelection = this.textEditor.selection();
+if (textSelection && !textSelection.isEmpty()) {
+if (textSelection.startLine !== textSelection.endLine || textSelection.startLine !== mouseLine || mouseColumn < textSelection.startColumn || mouseColumn > textSelection.endColumn)
+return null;
+
+var leftCorner = this.textEditor.cursorPositionToCoordinates(textSelection.startLine, textSelection.startColumn);
+var rightCorner = this.textEditor.cursorPositionToCoordinates(textSelection.endLine, textSelection.endColumn);
+var anchorBox = new AnchorBox(leftCorner.x, leftCorner.y, rightCorner.x - leftCorner.x, leftCorner.height);
+anchorBox.highlight = {
+lineNumber: textSelection.startLine,
+startColumn: textSelection.startColumn,
+endColumn: textSelection.endColumn - 1
+};
+anchorBox.forSelection = true;
+return anchorBox;
+}
 
 var token = this.textEditor.tokenAtTextPosition(textPosition.startLine, textPosition.startColumn);
 if (!token)
@@ -1798,8 +1941,11 @@ var leftCorner = this.textEditor.cursorPositionToCoordinates(lineNumber, token.s
 var rightCorner = this.textEditor.cursorPositionToCoordinates(lineNumber, token.endColumn + 1);
 var anchorBox = new AnchorBox(leftCorner.x, leftCorner.y, rightCorner.x - leftCorner.x, leftCorner.height);
 
-anchorBox.token = token;
-anchorBox.lineNumber = lineNumber;
+anchorBox.highlight = {
+lineNumber: lineNumber,
+startColumn: token.startColumn,
+endColumn: token.endColumn
+};
 
 return anchorBox;
 },
@@ -1817,7 +1963,7 @@ this._popoverAnchorBox = anchorBox;
 showCallback(WebInspector.RemoteObject.fromPayload(result), wasThrown, this._popoverAnchorBox);
 
 if (this._popoverAnchorBox) {
-var highlightRange = new WebInspector.TextRange(anchorBox.lineNumber, startHighlight, anchorBox.lineNumber, endHighlight);
+var highlightRange = new WebInspector.TextRange(lineNumber, startHighlight, lineNumber, endHighlight);
 this._popoverAnchorBox._highlightDescriptor = this.textEditor.highlightRange(highlightRange, "source-frame-eval-expression");
 }
 }
@@ -1826,14 +1972,15 @@ if (!WebInspector.debuggerModel.isPaused()) {
 this._popoverHelper.hidePopover();
 return;
 }
-
-var startHighlight = anchorBox.token.startColumn;
-var endHighlight = anchorBox.token.endColumn;
-var line = this.textEditor.line(anchorBox.lineNumber);
+var lineNumber = anchorBox.highlight.lineNumber;
+var startHighlight = anchorBox.highlight.startColumn;
+var endHighlight = anchorBox.highlight.endColumn;
+var line = this.textEditor.line(lineNumber);
+if (!anchorBox.forSelection) {
 while (startHighlight > 1 && line.charAt(startHighlight - 1) === '.')
-startHighlight = this.textEditor.tokenAtTextPosition(anchorBox.lineNumber, startHighlight - 2).startColumn;
+startHighlight = this.textEditor.tokenAtTextPosition(lineNumber, startHighlight - 2).startColumn;
+}
 var evaluationText = line.substring(startHighlight, endHighlight + 1);
-
 var selectedCallFrame = WebInspector.debuggerModel.selectedCallFrame();
 selectedCallFrame.evaluate(evaluationText, objectGroupName, false, true, false, false, showObjectPopover.bind(this));
 },
@@ -2309,8 +2456,8 @@ this.element.addStyleClass("navigator-container");
 this.element.appendChild(scriptsOutlineElement);
 this.setDefaultFocusedElement(this._scriptsTree.element);
 
-
-this._uiSourceCodeNodes = {};
+this._uiSourceCodeNodes = new Map();
+this._subfolderNodes = new Map();
 
 this._rootNode = new WebInspector.NavigatorRootTreeNode(this);
 this._rootNode.populate();
@@ -2321,7 +2468,7 @@ WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.E
 WebInspector.NavigatorView.Events = {
 ItemSelected: "ItemSelected",
 ItemSearchStarted: "ItemSearchStarted",
-FileRenamed: "FileRenamed"
+ItemRenamingRequested: "ItemRenamingRequested"
 }
 
 WebInspector.NavigatorView.iconClassForType = function(type)
@@ -2337,10 +2484,11 @@ WebInspector.NavigatorView.prototype = {
 
 addUISourceCode: function(uiSourceCode)
 {
-var node = this._getOrCreateUISourceCodeParentNode(uiSourceCode);
+var projectNode = this._projectNode(uiSourceCode.project());
+var folderNode = this._folderNode(projectNode, uiSourceCode.parentPath());
 var uiSourceCodeNode = new WebInspector.NavigatorUISourceCodeTreeNode(this, uiSourceCode);
-this._uiSourceCodeNodes[uiSourceCode.uri()] = uiSourceCodeNode;
-node.appendChild(uiSourceCodeNode);
+this._uiSourceCodeNodes.put(uiSourceCode, uiSourceCodeNode);
+folderNode.appendChild(uiSourceCodeNode);
 if (uiSourceCode.url === WebInspector.inspectedPageURL)
 this.revealUISourceCode(uiSourceCode);
 },
@@ -2348,94 +2496,61 @@ this.revealUISourceCode(uiSourceCode);
 
 _inspectedURLChanged: function(event)
 {
-var nodes = Object.values(this._uiSourceCodeNodes);
+var nodes = this._uiSourceCodeNodes.values();
 for (var i = 0; i < nodes.length; ++i) {
 var uiSourceCode = nodes[i].uiSourceCode();
 if (uiSourceCode.url === WebInspector.inspectedPageURL)
 this.revealUISourceCode(uiSourceCode);
 }
-
 },
 
 
-_getProjectNode: function(project)
+_projectNode: function(project)
 {
 if (!project.displayName())
 return this._rootNode;
-return this._rootNode.child(project.id());
-},
 
-
-_createProjectNode: function(project)
-{
+var projectNode = this._rootNode.child(project.id());
+if (!projectNode) {
 var type = project.type() === WebInspector.projectTypes.FileSystem ? WebInspector.NavigatorTreeOutline.Types.FileSystem : WebInspector.NavigatorTreeOutline.Types.Domain;
-var projectNode = new WebInspector.NavigatorFolderTreeNode(this, project.id(), type, project.displayName());
+projectNode = new WebInspector.NavigatorFolderTreeNode(this, project.id(), type, "", project.displayName());
 this._rootNode.appendChild(projectNode);
+}
 return projectNode;
 },
 
 
-_getOrCreateProjectNode: function(project)
+_folderNode: function(projectNode, folderPath)
 {
-return this._getProjectNode(project) || this._createProjectNode(project);
-},
+if (!folderPath)
+return projectNode;
 
+var subfolderNodes = this._subfolderNodes.get(projectNode);
+if (!subfolderNodes) {
+subfolderNodes = new StringMap();
+this._subfolderNodes.put(projectNode, subfolderNodes);
+}
 
-_getFolderNode: function(parentNode, name)
-{
-return parentNode.child(name);
-},
+var folderNode = subfolderNodes.get(folderPath);
+if (folderNode)
+return folderNode;
 
+var parentNode = projectNode;
+var index = folderPath.lastIndexOf("/");
+if (index !== -1)
+parentNode = this._folderNode(projectNode, folderPath.substring(0, index));
 
-_createFolderNode: function(parentNode, name)
-{
-var folderNode = new WebInspector.NavigatorFolderTreeNode(this, name, WebInspector.NavigatorTreeOutline.Types.Folder, name);
+var name = folderPath.substring(index + 1);
+folderNode = new WebInspector.NavigatorFolderTreeNode(this, name, WebInspector.NavigatorTreeOutline.Types.Folder, folderPath, name);
+subfolderNodes.put(folderPath, folderNode);
 parentNode.appendChild(folderNode);
 return folderNode;
 },
 
 
-_getOrCreateFolderNode: function(parentNode, name)
-{
-return this._getFolderNode(parentNode, name) || this._createFolderNode(parentNode, name);
-},
-
-
-_getUISourceCodeParentNode: function(uiSourceCode)
-{
-var projectNode = this._getProjectNode(uiSourceCode.project());
-if (!projectNode)
-return null;
-var path = uiSourceCode.path();
-var parentNode = projectNode;
-for (var i = 0; i < path.length - 1; ++i) {
-parentNode = this._getFolderNode(parentNode, path[i]);
-if (!parentNode)
-return null;
-}
-return parentNode;
-},
-
-
-_getOrCreateUISourceCodeParentNode: function(uiSourceCode)
-{
-var projectNode = this._getOrCreateProjectNode(uiSourceCode.project());
-if (!projectNode)
-return null;
-var path = uiSourceCode.path();
-var parentNode = projectNode;
-for (var i = 0; i < path.length - 1; ++i) {
-parentNode = this._getOrCreateFolderNode(parentNode, path[i]);
-if (!parentNode)
-return null;
-}
-return parentNode;
-},
-
-
 revealUISourceCode: function(uiSourceCode, select)
 {
-var node = this._uiSourceCodeNodes[uiSourceCode.uri()];
+var node = this._uiSourceCodeNodes.get(uiSourceCode);
 if (!node)
 return null;
 if (this._scriptsTree.selectedTreeElement)
@@ -2455,39 +2570,38 @@ this.dispatchEventToListeners(WebInspector.NavigatorView.Events.ItemSelected, da
 
 removeUISourceCode: function(uiSourceCode)
 {
-var parentNode = this._getUISourceCodeParentNode(uiSourceCode);
-if (!parentNode)
-return;
-var node = this._uiSourceCodeNodes[uiSourceCode.uri()];
+var node = this._uiSourceCodeNodes.get(uiSourceCode);
 if (!node)
 return;
-delete this._uiSourceCodeNodes[uiSourceCode.uri()]
+
+var projectNode = this._projectNode(uiSourceCode.project());
+var subfolderNodes = this._subfolderNodes.get(projectNode);
+var parentNode = node.parent;
+this._uiSourceCodeNodes.remove(uiSourceCode);
 parentNode.removeChild(node);
 node = parentNode;
+
 while (node) {
 parentNode = node.parent;
 if (!parentNode || !node.isEmpty())
 break;
+if (subfolderNodes)
+subfolderNodes.remove(node._folderPath);
 parentNode.removeChild(node);
 node = parentNode;
 }
 },
 
-_fileRenamed: function(uiSourceCode, newTitle)
-{    
-var data = { uiSourceCode: uiSourceCode, name: newTitle };
-this.dispatchEventToListeners(WebInspector.NavigatorView.Events.FileRenamed, data);
-},
 
-
-handleRename: function(uiSourceCode, callback)
+requestRename: function(uiSourceCode)
 {
+this.dispatchEventToListeners(WebInspector.ScriptsNavigator.Events.ItemRenamingRequested, uiSourceCode);
 },
 
 
 rename: function(uiSourceCode, callback)
 {
-var node = this._uiSourceCodeNodes[uiSourceCode.uri()];
+var node = this._uiSourceCodeNodes.get(uiSourceCode);
 if (!node)
 return null;
 node.rename(callback);
@@ -2495,11 +2609,13 @@ node.rename(callback);
 
 reset: function()
 {
-for (var uri in this._uiSourceCodeNodes)
-this._uiSourceCodeNodes[uri].dispose();
+var nodes = this._uiSourceCodeNodes.values();
+for (var i = 0; i < nodes.length; ++i)
+nodes[i].dispose();
 
 this._scriptsTree.removeChildren();
-this._uiSourceCodeNodes = {};
+this._uiSourceCodeNodes = new Map();
+this._subfolderNodes = new Map();
 this._rootNode.reset();
 },
 
@@ -2732,8 +2848,10 @@ this._warmedUpContent = content;
 }
 },
 
-_shouldRenameOnMouseDown: function(event)
+_shouldRenameOnMouseDown: function()
 {
+if (!this._uiSourceCode.canRename())
+return false;
 var isSelected = this === this.treeOutline.selectedTreeElement;
 var isFocused = this.treeOutline.childrenListElement.isSelfOrAncestor(document.activeElement);
 return isSelected && isFocused && !WebInspector.isBeingEdited(this.treeOutline.element);
@@ -2741,7 +2859,7 @@ return isSelected && isFocused && !WebInspector.isBeingEdited(this.treeOutline.e
 
 selectOnMouseDown: function(event)
 {
-if (!this._shouldRenameOnMouseDown()) {
+if (event.which !== 1 || !this._shouldRenameOnMouseDown()) {
 TreeElement.prototype.selectOnMouseDown.call(this, event);
 return;
 }
@@ -2750,7 +2868,7 @@ setTimeout(rename.bind(this), 300);
 function rename()
 {
 if (this._shouldRenameOnMouseDown())
-this._navigatorView.handleRename(this._uiSourceCode);
+this._navigatorView.requestRename(this._uiSourceCode);
 }
 },
 
@@ -2800,7 +2918,7 @@ __proto__: WebInspector.BaseNavigatorTreeElement.prototype
 WebInspector.NavigatorTreeNode = function(id)
 {
 this.id = id;
-this._children = {};
+this._children = new StringMap();
 }
 
 WebInspector.NavigatorTreeNode.prototype = {
@@ -2833,8 +2951,9 @@ this.wasPopulated();
 
 wasPopulated: function()
 {
-for (var id in this._children)
-this.treeElement().appendChild(this._children[id].treeElement());
+var children = this.children();
+for (var i = 0; i < children.length; ++i)
+this.treeElement().appendChild(children[i].treeElement());
 },
 
 didAddChild: function(node)
@@ -2856,22 +2975,22 @@ return this._populated;
 
 isEmpty: function()
 {
-return this.children().length === 0;
+return !this._children.size();
 },
 
 child: function(id)
 {
-return this._children[id];
+return this._children.get(id);
 },
 
 children: function()
 {
-return Object.values(this._children);
+return this._children.values();
 },
 
 appendChild: function(node)
 {
-this._children[node.id] = node;
+this._children.put(node.id, node);
 node.parent = this;
 this.didAddChild(node);
 },
@@ -2879,14 +2998,14 @@ this.didAddChild(node);
 removeChild: function(node)
 {
 this.willRemoveChild(node);
-delete this._children[node.id];
+this._children.remove(node.id);
 delete node.parent;
 node.dispose();
 },
 
 reset: function()
 {
-this._children = {};
+this._children.clear();
 }
 }
 
@@ -2910,24 +3029,6 @@ treeElement: function()
 return this._navigatorView._scriptsTree;
 },
 
-wasPopulated: function()
-{
-for (var id in this._children)
-this.treeElement().appendChild(this._children[id].treeElement());
-},
-
-didAddChild: function(node)
-{
-if (this.isPopulated())
-this.treeElement().appendChild(node.treeElement());
-},
-
-willRemoveChild: function(node)
-{
-if (this.isPopulated())
-this.treeElement().removeChild(node.treeElement());
-},
-
 __proto__: WebInspector.NavigatorTreeNode.prototype
 }
 
@@ -2937,6 +3038,7 @@ WebInspector.NavigatorUISourceCodeTreeNode = function(navigatorView, uiSourceCod
 WebInspector.NavigatorTreeNode.call(this, uiSourceCode.name());
 this._navigatorView = navigatorView;
 this._uiSourceCode = uiSourceCode;
+this._treeElement = null;
 }
 
 WebInspector.NavigatorUISourceCodeTreeNode.prototype = {
@@ -3035,8 +3137,22 @@ WebInspector.markBeingEdited(treeOutlineElement, true);
 
 function commitHandler(element, newTitle, oldTitle)
 {
-if (newTitle && newTitle !== oldTitle)
-this._navigatorView._fileRenamed(this._uiSourceCode, newTitle);
+if (newTitle !== oldTitle) {
+this._treeElement.titleText = newTitle;
+this._uiSourceCode.rename(newTitle, renameCallback.bind(this));
+return;
+}
+afterEditing.call(this, true);
+}
+
+function renameCallback(success)
+{
+if (!success) {
+WebInspector.markBeingEdited(treeOutlineElement, false);
+this.updateTitle();
+this.rename(callback);
+return;
+}
 afterEditing.call(this, true);
 }
 
@@ -3050,6 +3166,7 @@ function afterEditing(committed)
 {
 WebInspector.markBeingEdited(treeOutlineElement, false);
 this.updateTitle();
+this._treeElement.treeOutline.childrenListElement.focus();
 if (callback)
 callback(committed);
 }
@@ -3064,11 +3181,12 @@ __proto__: WebInspector.NavigatorTreeNode.prototype
 }
 
 
-WebInspector.NavigatorFolderTreeNode = function(navigatorView, id, type, title)
+WebInspector.NavigatorFolderTreeNode = function(navigatorView, id, type, folderPath, title)
 {
 WebInspector.NavigatorTreeNode.call(this, id);
 this._navigatorView = navigatorView;
 this._type = type;
+this._folderPath = folderPath;
 this._title = title;
 }
 
@@ -3099,8 +3217,9 @@ this._addChildrenRecursive();
 
 _addChildrenRecursive: function()
 {
-for (var id in this._children) {
-var child = this._children[id];
+var children = this.children();
+for (var i = 0; i < children.length; ++i) {
+var child = children[i];
 this.didAddChild(child);
 if (child instanceof WebInspector.NavigatorFolderTreeNode)
 child._addChildrenRecursive();
@@ -3215,7 +3334,7 @@ this._createUISourceCodeItem(uiSourceCode);
 
 WebInspector.workspace.uiSourceCodes().forEach(populateRevisions.bind(this));
 WebInspector.workspace.addEventListener(WebInspector.Workspace.Events.UISourceCodeContentCommitted, this._revisionAdded, this);
-WebInspector.workspace.addEventListener(WebInspector.UISourceCodeProvider.Events.UISourceCodeRemoved, this._uiSourceCodeRemoved, this);
+WebInspector.workspace.addEventListener(WebInspector.Workspace.Events.UISourceCodeRemoved, this._uiSourceCodeRemoved, this);
 WebInspector.workspace.addEventListener(WebInspector.Workspace.Events.ProjectWillReset, this._projectWillReset, this);
 
 this._statusElement = document.createElement("span");
@@ -3417,8 +3536,7 @@ lastWasSeparator = true;
 
 oncollapse: function()
 {
-if (this._revertElement.parentElement)
-this._revertElement.parentElement.removeChild(this._revertElement);
+this._revertElement.remove();
 },
 
 
@@ -3619,17 +3737,18 @@ this._tabbedPane.element.addStyleClass("navigator-tabbed-pane");
 this._scriptsView = new WebInspector.NavigatorView();
 this._scriptsView.addEventListener(WebInspector.NavigatorView.Events.ItemSelected, this._scriptSelected, this);
 this._scriptsView.addEventListener(WebInspector.NavigatorView.Events.ItemSearchStarted, this._itemSearchStarted, this);
+this._scriptsView.addEventListener(WebInspector.NavigatorView.Events.ItemRenamingRequested, this._itemRenamingRequested, this);
 
 this._contentScriptsView = new WebInspector.NavigatorView();
 this._contentScriptsView.addEventListener(WebInspector.NavigatorView.Events.ItemSelected, this._scriptSelected, this);
 this._contentScriptsView.addEventListener(WebInspector.NavigatorView.Events.ItemSearchStarted, this._itemSearchStarted, this);
+this._contentScriptsView.addEventListener(WebInspector.NavigatorView.Events.ItemRenamingRequested, this._itemRenamingRequested, this);
 
 this._snippetsView = new WebInspector.SnippetsNavigatorView();
 this._snippetsView.addEventListener(WebInspector.NavigatorView.Events.ItemSelected, this._scriptSelected, this);
 this._snippetsView.addEventListener(WebInspector.NavigatorView.Events.ItemSearchStarted, this._itemSearchStarted, this);
-this._snippetsView.addEventListener(WebInspector.NavigatorView.Events.FileRenamed, this._fileRenamed, this);
+this._snippetsView.addEventListener(WebInspector.NavigatorView.Events.ItemRenamingRequested, this._itemRenamingRequested, this);
 this._snippetsView.addEventListener(WebInspector.SnippetsNavigatorView.Events.SnippetCreationRequested, this._snippetCreationRequested, this);
-this._snippetsView.addEventListener(WebInspector.SnippetsNavigatorView.Events.ItemRenamingRequested, this._itemRenamingRequested, this);
 
 this._tabbedPane.appendTab(WebInspector.ScriptsNavigator.ScriptsTab, WebInspector.UIString("Sources"), this._scriptsView);
 this._tabbedPane.selectTab(WebInspector.ScriptsNavigator.ScriptsTab);
@@ -3642,7 +3761,6 @@ ScriptSelected: "ScriptSelected",
 SnippetCreationRequested: "SnippetCreationRequested",
 ItemRenamingRequested: "ItemRenamingRequested",
 ItemSearchStarted: "ItemSearchStarted",
-FileRenamed: "FileRenamed"
 }
 
 WebInspector.ScriptsNavigator.ScriptsTab = "scripts";
@@ -3708,12 +3826,6 @@ this.dispatchEventToListeners(WebInspector.ScriptsNavigator.Events.ItemSearchSta
 },
 
 
-_fileRenamed: function(event)
-{    
-this.dispatchEventToListeners(WebInspector.ScriptsNavigator.Events.FileRenamed, event.data);
-},
-
-
 _itemRenamingRequested: function(event)
 {
 this.dispatchEventToListeners(WebInspector.ScriptsNavigator.Events.ItemRenamingRequested, event.data);
@@ -3736,8 +3848,7 @@ this.element.addEventListener("contextmenu", this.handleContextMenu.bind(this), 
 }
 
 WebInspector.SnippetsNavigatorView.Events = {
-SnippetCreationRequested: "SnippetCreationRequested",
-ItemRenamingRequested: "ItemRenamingRequested"
+SnippetCreationRequested: "SnippetCreationRequested"
 }
 
 WebInspector.SnippetsNavigatorView.prototype = {
@@ -3747,7 +3858,7 @@ handleContextMenu: function(event, uiSourceCode)
 var contextMenu = new WebInspector.ContextMenu(event);
 if (uiSourceCode) {
 contextMenu.appendItem(WebInspector.UIString("Run"), this._handleEvaluateSnippet.bind(this, uiSourceCode));
-contextMenu.appendItem(WebInspector.UIString("Rename"), this.handleRename.bind(this, uiSourceCode));
+contextMenu.appendItem(WebInspector.UIString("Rename"), this.requestRename.bind(this, uiSourceCode));
 contextMenu.appendItem(WebInspector.UIString("Remove"), this._handleRemoveSnippet.bind(this, uiSourceCode));
 contextMenu.appendSeparator();
 }
@@ -3761,12 +3872,6 @@ _handleEvaluateSnippet: function(uiSourceCode)
 if (uiSourceCode.project().type() !== WebInspector.projectTypes.Snippets)
 return;
 WebInspector.scriptSnippetModel.evaluateScriptSnippet(uiSourceCode);
-},
-
-
-handleRename: function(uiSourceCode)
-{
-this.dispatchEventToListeners(WebInspector.ScriptsNavigator.Events.ItemRenamingRequested, uiSourceCode);
 },
 
 
@@ -3899,6 +4004,7 @@ WebInspector.SelectionDialogContentProvider.call(this);
 this._rules = [];
 this._view = view;
 this._uiSourceCode = uiSourceCode;
+this._requestItems();
 }
 
 
@@ -3913,21 +4019,9 @@ WebInspector.Dialog.show(view.element, filteredItemSelectionDialog);
 
 WebInspector.StyleSheetOutlineDialog.prototype = {
 
-itemTitleAt: function(itemIndex)
+itemCount: function()
 {
-return this._rules[itemIndex].selectorText;
-},
-
-
-itemSuffixAt: function(itemIndex)
-{
-return "";
-},
-
-
-itemSubtitleAt: function(itemIndex)
-{
-return ":" + (this._rules[itemIndex].sourceLine + 1);
+return this._rules.length;
 },
 
 
@@ -3937,20 +4031,27 @@ return this._rules[itemIndex].selectorText;
 },
 
 
-itemsCount: function()
+itemScoreAt: function(itemIndex, query)
 {
-return this._rules.length;
+var rule = this._rules[itemIndex];
+return -rule.rawLocation.lineNumber;
 },
 
 
-requestItems: function(callback)
+renderItem: function(itemIndex, query, titleElement, subtitleElement)
+{
+var rule = this._rules[itemIndex];
+titleElement.textContent = rule.selectorText;
+this.highlightRanges(titleElement, query);
+subtitleElement.textContent = ":" + (rule.rawLocation.lineNumber + 1);
+},
+
+_requestItems: function()
 {
 function didGetAllStyleSheets(error, infos)
 {
-if (error) {
-callback(0, 0);
+if (error)
 return;
-}
 
 for (var i = 0; i < infos.length; ++i) {
 var info = infos[i];
@@ -3959,7 +4060,6 @@ WebInspector.CSSStyleSheet.createForId(info.styleSheetId, didGetStyleSheet.bind(
 return;
 }
 }
-callback(0, 0);
 }
 
 CSSAgent.getAllStyleSheets(didGetAllStyleSheets.bind(this));
@@ -3967,34 +4067,25 @@ CSSAgent.getAllStyleSheets(didGetAllStyleSheets.bind(this));
 
 function didGetStyleSheet(styleSheet)
 {
-if (!styleSheet) {
-callback(0, 0);
+if (!styleSheet)
 return;
-}
 
 this._rules = styleSheet.rules;
-callback(0, 1);
+this.refresh();
 }
 },
 
 
 selectItem: function(itemIndex, promptValue)
 {
-var lineNumber = this._rules[itemIndex].sourceLine;
+var rule = this._rules[itemIndex];
+var lineNumber = rule.rawLocation.lineNumber;
 if (!isNaN(lineNumber) && lineNumber >= 0)
-this._view.highlightLine(lineNumber);
+this._view.highlightPosition(lineNumber, rule.rawLocation.columnNumber);
 this._view.focus();
 },
 
-
-rewriteQuery: function(query)
-{
-return query;
-},
-
-dispose: function()
-{
-}
+__proto__: WebInspector.SelectionDialogContentProvider.prototype
 }
 ;
 
@@ -4008,12 +4099,13 @@ viewForFile: function(uiSourceCode) { }
 }
 
 
-WebInspector.TabbedEditorContainer = function(delegate, settingName)
+WebInspector.TabbedEditorContainer = function(delegate, settingName, placeholderText)
 {
 WebInspector.Object.call(this);
 this._delegate = delegate;
 
 this._tabbedPane = new WebInspector.TabbedPane();
+this._tabbedPane.setPlaceholderText(placeholderText);
 this._tabbedPane.setTabDelegate(new WebInspector.EditorContainerTabDelegate(this));
 
 this._tabbedPane.closeableTabs = true;
@@ -4024,7 +4116,6 @@ this._tabbedPane.addEventListener(WebInspector.TabbedPane.EventTypes.TabSelected
 
 this._tabIds = new Map();
 this._files = {};
-this._loadedURIs = {};
 
 this._previouslyViewedFilesSetting = WebInspector.settings.createSetting(settingName, []);
 this._history = WebInspector.TabbedEditorContainer.History.fromObject(this._previouslyViewedFilesSetting.get());
@@ -4063,6 +4154,26 @@ this._tabbedPane.show(parentElement);
 showFile: function(uiSourceCode)
 {
 this._innerShowFile(uiSourceCode, true);
+},
+
+
+historyUISourceCodes: function()
+{
+
+var uriToUISourceCode = {};
+for (var id in this._files) {
+var uiSourceCode = this._files[id];
+uriToUISourceCode[uiSourceCode.uri()] = uiSourceCode;
+}
+
+var result = [];
+var uris = this._history._urls();
+for (var i = 0; i < uris.length; ++i) {
+var uiSourceCode = uriToUISourceCode[uris[i]];
+if (uiSourceCode)
+result.push(uiSourceCode);
+}
+return result;
 },
 
 _addScrollAndSelectionListeners: function()
@@ -4170,11 +4281,11 @@ break;
 
 addUISourceCode: function(uiSourceCode)
 {
-if (this._userSelectedFiles || this._loadedURIs[uiSourceCode.uri()])
+var uri = uiSourceCode.uri();
+if (this._userSelectedFiles)
 return;
-this._loadedURIs[uiSourceCode.uri()] = true;
 
-var index = this._history.index(uiSourceCode.uri())
+var index = this._history.index(uri)
 if (index === -1)
 return;
 
@@ -4208,7 +4319,6 @@ removeUISourceCodes: function(uiSourceCodes)
 var tabIds = [];
 for (var i = 0; i < uiSourceCodes.length; ++i) {
 var uiSourceCode = uiSourceCodes[i];
-delete this._loadedURIs[uiSourceCode.uri()];
 var tabId = this._tabIds.get(uiSourceCode);
 if (tabId)
 tabIds.push(tabId);
@@ -4260,12 +4370,12 @@ var tabId = this._generateTabId();
 this._tabIds.put(uiSourceCode, tabId);
 this._files[tabId] = uiSourceCode;
 
-var savedScrollLineNumber = this._history.scrollLineNumber(uiSourceCode.uri());
-if (savedScrollLineNumber)
-view.scrollToLine(savedScrollLineNumber);
 var savedSelectionRange = this._history.selectionRange(uiSourceCode.uri());
 if (savedSelectionRange)
 view.setSelection(savedSelectionRange);
+var savedScrollLineNumber = this._history.scrollLineNumber(uiSourceCode.uri());
+if (savedScrollLineNumber)
+view.scrollToLine(savedScrollLineNumber);
 
 this._tabbedPane.appendTab(tabId, title, view, tooltip, userGesture);
 
@@ -4312,6 +4422,7 @@ _addUISourceCodeListeners: function(uiSourceCode)
 uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.TitleChanged, this._uiSourceCodeTitleChanged, this);
 uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.WorkingCopyChanged, this._uiSourceCodeWorkingCopyChanged, this);
 uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.WorkingCopyCommitted, this._uiSourceCodeWorkingCopyCommitted, this);
+uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.SavedStateUpdated, this._uiSourceCodeSavedStateUpdated, this);
 uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.FormattedChanged, this._uiSourceCodeFormattedChanged, this);
 },
 
@@ -4321,6 +4432,7 @@ _removeUISourceCodeListeners: function(uiSourceCode)
 uiSourceCode.removeEventListener(WebInspector.UISourceCode.Events.TitleChanged, this._uiSourceCodeTitleChanged, this);
 uiSourceCode.removeEventListener(WebInspector.UISourceCode.Events.WorkingCopyChanged, this._uiSourceCodeWorkingCopyChanged, this);
 uiSourceCode.removeEventListener(WebInspector.UISourceCode.Events.WorkingCopyCommitted, this._uiSourceCodeWorkingCopyCommitted, this);
+uiSourceCode.removeEventListener(WebInspector.UISourceCode.Events.SavedStateUpdated, this._uiSourceCodeSavedStateUpdated, this);
 uiSourceCode.removeEventListener(WebInspector.UISourceCode.Events.FormattedChanged, this._uiSourceCodeFormattedChanged, this);
 },
 
@@ -4331,6 +4443,10 @@ var tabId = this._tabIds.get(uiSourceCode);
 if (tabId) {
 var title = this._titleForFile(uiSourceCode);
 this._tabbedPane.changeTabTitle(tabId, title);
+if (uiSourceCode.hasUnsavedCommittedChanges())
+this._tabbedPane.setTabIcon(tabId, "editor-container-unsaved-committed-changes-icon", WebInspector.UIString("Changes to this file were not saved to file system."));
+else
+this._tabbedPane.setTabIcon(tabId, "");
 }
 },
 
@@ -4338,6 +4454,7 @@ _uiSourceCodeTitleChanged: function(event)
 {
 var uiSourceCode =   (event.target);
 this._updateFileTitle(uiSourceCode);
+this._updateHistory();
 },
 
 _uiSourceCodeWorkingCopyChanged: function(event)
@@ -4347,6 +4464,12 @@ this._updateFileTitle(uiSourceCode);
 },
 
 _uiSourceCodeWorkingCopyCommitted: function(event)
+{
+var uiSourceCode =   (event.target);
+this._updateFileTitle(uiSourceCode);
+},
+
+_uiSourceCodeSavedStateUpdated: function(event)
 {
 var uiSourceCode =   (event.target);
 this._updateFileTitle(uiSourceCode);
@@ -4525,6 +4648,16 @@ if (serializedHistory.length === WebInspector.TabbedEditorContainer.maximalPrevi
 break;
 }
 return serializedHistory;
+},
+
+
+
+_urls: function()
+{
+var result = [];
+for (var i = 0; i < this._items.length; ++i)
+result.push(this._items[i].url);
+return result;
 },
 
 __proto__: WebInspector.Object.prototype
@@ -5042,9 +5175,8 @@ this._addWorker(event.data.workerId, event.data.url, event.data.inspectorConnect
 
 _workerRemoved: function(event)
 {
-var workerItem = this._idToWorkerItem[event.data];
+this._idToWorkerItem[event.data].remove();
 delete this._idToWorkerItem[event.data];
-workerItem.parentElement.removeChild(workerItem);
 },
 
 _workersCleared: function(event)
@@ -5123,7 +5255,8 @@ this.editorView.show(this.splitView.mainElement);
 this._navigator = new WebInspector.ScriptsNavigator();
 this._navigator.view.show(this.editorView.sidebarElement);
 
-this._editorContainer = new WebInspector.TabbedEditorContainer(this, "previouslyViewedFiles");
+var tabbedEditorPlaceholderText = WebInspector.isMac() ? WebInspector.UIString("Hit Cmd+O to open a file") : WebInspector.UIString("Hit Ctrl+O to open a file");
+this._editorContainer = new WebInspector.TabbedEditorContainer(this, "previouslyViewedFiles", tabbedEditorPlaceholderText);
 this._editorContainer.show(this.editorView.mainElement);
 
 this._navigatorController = new WebInspector.NavigatorOverlayController(this.editorView, this._navigator.view, this._editorContainer.view);
@@ -5132,7 +5265,6 @@ this._navigator.addEventListener(WebInspector.ScriptsNavigator.Events.ScriptSele
 this._navigator.addEventListener(WebInspector.ScriptsNavigator.Events.ItemSearchStarted, this._itemSearchStarted, this);
 this._navigator.addEventListener(WebInspector.ScriptsNavigator.Events.SnippetCreationRequested, this._snippetCreationRequested, this);
 this._navigator.addEventListener(WebInspector.ScriptsNavigator.Events.ItemRenamingRequested, this._itemRenamingRequested, this);
-this._navigator.addEventListener(WebInspector.ScriptsNavigator.Events.FileRenamed, this._fileRenamed, this);
 
 this._editorContainer.addEventListener(WebInspector.TabbedEditorContainer.Events.EditorSelected, this._editorSelected, this);
 this._editorContainer.addEventListener(WebInspector.TabbedEditorContainer.Events.EditorClosed, this._editorClosed, this);
@@ -5143,7 +5275,7 @@ this.sidebarPanes = {};
 this.sidebarPanes.watchExpressions = new WebInspector.WatchExpressionsSidebarPane();
 this.sidebarPanes.callstack = new WebInspector.CallStackSidebarPane();
 this.sidebarPanes.scopechain = new WebInspector.ScopeChainSidebarPane();
-this.sidebarPanes.jsBreakpoints = new WebInspector.JavaScriptBreakpointsSidebarPane(WebInspector.breakpointManager, this._showSourceLine.bind(this));
+this.sidebarPanes.jsBreakpoints = new WebInspector.JavaScriptBreakpointsSidebarPane(WebInspector.breakpointManager, this._showSourceLocation.bind(this));
 this.sidebarPanes.domBreakpoints = WebInspector.domBreakpointsSidebarPane.createProxy(this);
 this.sidebarPanes.xhrBreakpoints = new WebInspector.XHRBreakpointsSidebarPane();
 this.sidebarPanes.eventListenerBreakpoints = new WebInspector.EventListenerBreakpointsSidebarPane();
@@ -5154,7 +5286,6 @@ this.sidebarPanes.workerList = new WebInspector.WorkersSidebarPane(WebInspector.
 }
 
 this.sidebarPanes.callstack.registerShortcuts(this.registerShortcuts.bind(this));
-this.registerShortcuts(WebInspector.ScriptsPanelDescriptor.ShortcutKeys.EvaluateSelectionInConsole, this._evaluateSelectionInConsole.bind(this));
 this.registerShortcuts(WebInspector.ScriptsPanelDescriptor.ShortcutKeys.GoToMember, this._showOutlineDialog.bind(this));
 this.registerShortcuts(WebInspector.ScriptsPanelDescriptor.ShortcutKeys.ToggleBreakpoint, this._toggleBreakpoint.bind(this));
 
@@ -5194,13 +5325,11 @@ WebInspector.debuggerModel.addEventListener(WebInspector.DebuggerModel.Events.Ex
 WebInspector.debuggerModel.addEventListener(WebInspector.DebuggerModel.Events.BreakpointsActiveStateChanged, this._breakpointsActiveStateChanged, this);
 
 WebInspector.startBatchUpdate();
-var uiSourceCodes = this._workspace.uiSourceCodes();
-for (var i = 0; i < uiSourceCodes.length; ++i)
-this._addUISourceCode(uiSourceCodes[i]);
+this._workspace.uiSourceCodes().forEach(this._addUISourceCode.bind(this));
 WebInspector.endBatchUpdate();
 
-this._workspace.addEventListener(WebInspector.UISourceCodeProvider.Events.UISourceCodeAdded, this._uiSourceCodeAdded, this);
-this._workspace.addEventListener(WebInspector.UISourceCodeProvider.Events.UISourceCodeRemoved, this._uiSourceCodeRemoved, this);
+this._workspace.addEventListener(WebInspector.Workspace.Events.UISourceCodeAdded, this._uiSourceCodeAdded, this);
+this._workspace.addEventListener(WebInspector.Workspace.Events.UISourceCodeRemoved, this._uiSourceCodeRemoved, this);
 this._workspace.addEventListener(WebInspector.Workspace.Events.ProjectWillReset, this._projectWillReset.bind(this), this);
 WebInspector.debuggerModel.addEventListener(WebInspector.DebuggerModel.Events.GlobalObjectCleared, this._debuggerReset, this);
 
@@ -5309,7 +5438,7 @@ WebInspector.domBreakpointsSidebarPane.createBreakpointHitStatusMessage(details.
 } else if (details.reason === WebInspector.DebuggerModel.BreakReason.EventListener) {
 var eventName = details.auxData.eventName;
 this.sidebarPanes.eventListenerBreakpoints.highlightBreakpoint(details.auxData.eventName);
-var eventNameForUI = WebInspector.EventListenerBreakpointsSidebarPane.eventNameForUI(eventName);
+var eventNameForUI = WebInspector.EventListenerBreakpointsSidebarPane.eventNameForUI(eventName, details.auxData);
 this.sidebarPanes.callstack.setStatus(WebInspector.UIString("Paused on a \"%s\" Event Listener.", eventNameForUI));
 } else if (details.reason === WebInspector.DebuggerModel.BreakReason.XHR) {
 this.sidebarPanes.xhrBreakpoints.highlightBreakpoint(details.auxData["breakpointURL"]);
@@ -5320,6 +5449,8 @@ else if (details.reason === WebInspector.DebuggerModel.BreakReason.Assert)
 this.sidebarPanes.callstack.setStatus(WebInspector.UIString("Paused on assertion."));
 else if (details.reason === WebInspector.DebuggerModel.BreakReason.CSPViolation)
 this.sidebarPanes.callstack.setStatus(WebInspector.UIString("Paused on a script blocked due to Content Security Policy directive: \"%s\".", details.auxData["directiveText"]));
+else if (details.reason === WebInspector.DebuggerModel.BreakReason.DebugCommand)
+this.sidebarPanes.callstack.setStatus(WebInspector.UIString("Paused on a debugged function"));
 else {
 function didGetUILocation(uiLocation)
 {
@@ -5397,6 +5528,7 @@ this._scriptViewStatusBarTextContainer.appendChild(statusBarText);
 }
 },
 
+
 canShowAnchorLocation: function(anchor)
 {
 if (WebInspector.debuggerModel.debuggerEnabled() && anchor.uiSourceCode)
@@ -5409,23 +5541,24 @@ return true;
 return false;
 },
 
+
 showAnchorLocation: function(anchor)
 {
-this._showSourceLine(anchor.uiSourceCode, anchor.lineNumber);
+this._showSourceLocation(anchor.uiSourceCode, anchor.lineNumber, anchor.columnNumber);
 },
 
 
-showUISourceCode: function(uiSourceCode, lineNumber)
+showUISourceCode: function(uiSourceCode, lineNumber, columnNumber)
 {
-this._showSourceLine(uiSourceCode, lineNumber);
+this._showSourceLocation(uiSourceCode, lineNumber, columnNumber);
 },
 
 
-_showSourceLine: function(uiSourceCode, lineNumber)
+_showSourceLocation: function(uiSourceCode, lineNumber, columnNumber)
 {
 var sourceFrame = this._showFile(uiSourceCode);
 if (typeof lineNumber === "number")
-sourceFrame.highlightLine(lineNumber);
+sourceFrame.highlightPosition(lineNumber, columnNumber);
 sourceFrame.focus();
 
 WebInspector.notifications.dispatchEventToListeners(WebInspector.UserMetrics.UserAction, {
@@ -5747,16 +5880,6 @@ this.sidebarPanes.jsBreakpoints.listElement.addStyleClass("breakpoints-list-deac
 }
 },
 
-
-_evaluateSelectionInConsole: function(event)
-{
-var selection = window.getSelection();
-if (selection.type !== "Range" || selection.isCollapsed)
-return false;
-WebInspector.evaluateInConsole(selection.toString());
-return true;
-},
-
 _createDebugToolbar: function()
 {
 var debugToolbar = document.createElement("div");
@@ -5767,8 +5890,9 @@ var title, handler;
 var platformSpecificModifier = WebInspector.KeyboardShortcut.Modifiers.CtrlOrMeta;
 
 
+title = WebInspector.UIString("Run snippet (%s).");
 handler = this._runSnippet.bind(this);
-this._runSnippetButton = this._createButtonAndRegisterShortcuts("scripts-run-snippet", "", handler, WebInspector.ScriptsPanelDescriptor.ShortcutKeys.RunSnippet);
+this._runSnippetButton = this._createButtonAndRegisterShortcuts("scripts-run-snippet", title, handler, WebInspector.ScriptsPanelDescriptor.ShortcutKeys.RunSnippet);
 debugToolbar.appendChild(this._runSnippetButton.element);
 this._runSnippetButton.element.addStyleClass("hidden");
 
@@ -6019,21 +6143,11 @@ this.debugSidebarResizeWidgetElement.addStyleClass("hidden");
 WebInspector.settings.debuggerSidebarHidden.set(true);
 },
 
-_fileRenamed: function(event)
-{
-var uiSourceCode =   (event.data.uiSourceCode);
-var name =   (event.data.name);
-if (uiSourceCode.project().type() !== WebInspector.projectTypes.Snippets)
-return;
-WebInspector.scriptSnippetModel.renameScriptSnippet(uiSourceCode, name);
-uiSourceCode.rename(name);
-},
-
 
 _snippetCreationRequested: function(event)
 {
 var uiSourceCode = WebInspector.scriptSnippetModel.createScriptSnippet();
-this._showSourceLine(uiSourceCode);
+this._showSourceLocation(uiSourceCode);
 
 var shouldHideNavigator = !this._navigatorController.isNavigatorPinned();
 if (this._navigatorController.isNavigatorHidden())
@@ -6051,7 +6165,7 @@ WebInspector.scriptSnippetModel.deleteScriptSnippet(uiSourceCode);
 return;
 }
 
-this._showSourceLine(uiSourceCode);
+this._showSourceLocation(uiSourceCode);
 }
 },
 
@@ -6070,7 +6184,7 @@ function callback(committed)
 {
 if (shouldHideNavigator && committed) {
 this._navigatorController.hideNavigatorOverlay();
-this._showSourceLine(uiSourceCode);
+this._showSourceLocation(uiSourceCode);
 }
 }
 },
@@ -6153,7 +6267,7 @@ return;
 var uiSourceCode =   (target);
 contextMenu.appendItem(WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Local modifications\u2026" : "Local Modifications\u2026"), this._showLocalHistory.bind(this, uiSourceCode));
 
-if (WebInspector.isolatedFileSystemManager.supportsFileSystems() && WebInspector.experimentsSettings.fileSystemProject.isEnabled())
+if (WebInspector.isolatedFileSystemManager.supportsFileSystems())
 this._appendUISourceCodeMappingItems(contextMenu, uiSourceCode);
 
 var resource = WebInspector.resourceForURL(uiSourceCode.url);
@@ -6178,7 +6292,7 @@ return;
 }
 WebInspector.inspectorView.showPanelForAnchorNavigation(this);
 var uiLocation = WebInspector.debuggerModel.rawLocationToUILocation(response.location);
-this._showSourceLine(uiLocation.uiSourceCode, uiLocation.lineNumber);
+this._showSourceLocation(uiLocation.uiSourceCode, uiLocation.lineNumber, uiLocation.columnNumber);
 }
 
 function revealFunction()
@@ -6191,7 +6305,11 @@ contextMenu.appendItem(WebInspector.UIString(WebInspector.useLowerCaseMenuTitles
 
 showGoToSourceDialog: function()
 {
-WebInspector.OpenResourceDialog.show(this, this.editorView.mainElement);
+var uiSourceCodes = this._editorContainer.historyUISourceCodes();
+var defaultScores = new Map();
+for (var i = 1; i < uiSourceCodes.length; ++i) 
+defaultScores.put(uiSourceCodes[i], uiSourceCodes.length - i);
+WebInspector.OpenResourceDialog.show(this, this.editorView.mainElement, undefined, defaultScores);
 },
 
 _dockSideChanged: function()

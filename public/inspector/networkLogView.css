@@ -8,12 +8,12 @@
 }
 
 .network-log-grid.data-grid table.data {
-    -webkit-background-size: 1px 82px;
+    background-size: 1px 82px;
     background-image: -webkit-gradient(linear, left top, left bottom, from(rgba(0, 0, 0, 0)), color-stop(0.5, rgba(0, 0, 0, 0)), color-stop(0.5, rgba(0, 0, 0, 0.05)), to(rgba(0, 0, 0, 0.05)));
 }
 
 .network-log-grid.data-grid.small table.data {
-    -webkit-background-size: 1px 42px;
+    background-size: 1px 42px;
 }
 
 .network-log-grid.data-grid td {
@@ -36,7 +36,9 @@
     height: 22px;
 }
 
-.network-log-grid.data-grid th, .network-log-grid.data-grid th.sort-descending, .network-log-grid.data-grid th.sort-ascending {
+.network-log-grid.data-grid th,
+.network-log-grid.data-grid th.sort-descending,
+.network-log-grid.data-grid th.sort-ascending {
     background: -webkit-gradient(linear, left top, left bottom, from(rgb(236, 236, 236)), to(rgb(217, 217, 217)));
 }
 
@@ -94,7 +96,8 @@
     color: gray;
 }
 
-.network-error-row, .network-error-row .network-cell-subtitle {
+.network-error-row,
+.network-error-row .network-cell-subtitle {
     color: rgb(230, 0, 0);
 }
 
@@ -120,8 +123,7 @@
 }
 
 .network-log-grid.data-grid.small .network-cell-subtitle,
-.network-log-grid.data-grid.small .network-header-subtitle
-{
+.network-log-grid.data-grid.small .network-header-subtitle {
     display: none;
 }
 
@@ -303,7 +305,8 @@
     -webkit-border-image: url(Images/timelinePillGray.png) 7 7 7 7;
 }
 
-.network-graph-bar.waiting, .network-graph-bar.waiting-right {
+.network-graph-bar.waiting,
+.network-graph-bar.waiting-right {
     opacity: 0.35;
 }
 
@@ -461,7 +464,7 @@
 
 /* Filters */
 
-.network-log-grid.data-grid table.data tr.revealed.network-item {
+.network-log-grid.data-grid table.data tr.revealed.network-item.filtered-out {
     display: none;
 }
 
@@ -507,7 +510,7 @@
     overflow-x: hidden;
 }
 
-// Brief mode peculiarities.
+/* Brief mode peculiarities. */
 #network-container.brief-mode .network-timeline-grid {
     display: none;
 }

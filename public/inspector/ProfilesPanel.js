@@ -24,6 +24,12 @@ ViewUpdated: "view-updated"
 
 WebInspector.ProfileType.prototype = {
 
+hasTemporaryView: function()
+{
+return false;
+},
+
+
 fileExtension: function()
 {
 return null;
@@ -69,6 +75,12 @@ return "";
 isInstantProfile: function()
 {
 return false;
+},
+
+
+isEnabled: function()
+{
+return true;
 },
 
 
@@ -252,6 +264,12 @@ throw new Error("Needs implemented");
 fromFile: function()
 {
 return this._fromFile;
+},
+
+setFromFile: function()
+{
+this._fromFile = true;
+this.uid = -2;
 }
 }
 
@@ -307,6 +325,7 @@ this._registerProfileType(new WebInspector.CPUProfileType());
 if (!WebInspector.WorkerManager.isWorkerFrontend())
 this._registerProfileType(new WebInspector.CSSSelectorProfileType());
 this._registerProfileType(new WebInspector.HeapSnapshotProfileType());
+this._registerProfileType(new WebInspector.TrackingHeapSnapshotProfileType(this));
 if (!WebInspector.WorkerManager.isWorkerFrontend() && WebInspector.experimentsSettings.nativeMemorySnapshots.isEnabled()) {
 this._registerProfileType(new WebInspector.NativeSnapshotProfileType());
 this._registerProfileType(new WebInspector.NativeMemoryProfileType());
@@ -381,8 +400,8 @@ return;
 }
 
 var temporaryProfile = profileType.createTemporaryProfile(WebInspector.ProfilesPanelDescriptor.UserInitiatedProfileName + "." + file.name);
+temporaryProfile.setFromFile();
 profileType.addProfile(temporaryProfile);
-temporaryProfile._fromFile = true;
 temporaryProfile.loadFromFile(file);
 },
 
@@ -425,6 +444,7 @@ _updateProfileTypeSpecificUI: function()
 {
 this.recordButton.title = this._selectedProfileType.buttonTooltip;
 
+this._launcherView.updateProfileType(this._selectedProfileType);
 this._profileTypeStatusBarItemsContainer.removeChildren();
 var statusBarItems = this._selectedProfileType.statusBarItems;
 if (statusBarItems) {
@@ -544,9 +564,6 @@ return escape(text) + '/' + escape(profileTypeId);
 
 _addProfileHeader: function(profile)
 {
-if (!profile.isTemporary)
-this._removeTemporaryProfile(profile.profileType().id);
-
 var profileType = profile.profileType();
 var typeId = profileType.id;
 var sidebarParent = profileType.treeElement;
@@ -596,10 +613,18 @@ if (alternateTitle)
 profileTreeElement.mainTitle = alternateTitle;
 profile._profilesTreeElement = profileTreeElement;
 
+var temporaryProfile = profileType.findTemporaryProfile();
+if (profile.isTemporary || !temporaryProfile)
 sidebarParent.appendChild(profileTreeElement);
-if (!profile.isTemporary) {
-if (!this.visibleView)
+else {
+if (temporaryProfile) {
+sidebarParent.insertBeforeChild(profileTreeElement, temporaryProfile._profilesTreeElement);
+this._removeTemporaryProfile(profile.profileType().id);
+}
+
+if (!this.visibleView || this.visibleView === this._launcherView)
 this._showProfile(profile);
+
 this.dispatchEventToListeners("profile added", {
 type: typeId
 });
@@ -644,7 +669,7 @@ sidebarParent.hidden = !this._singleProfileMode;
 
 _showProfile: function(profile)
 {
-if (!profile || profile.isTemporary)
+if (!profile || (profile.isTemporary && !profile.profileType().hasTemporaryView()))
 return null;
 
 var view = profile.view(this);
@@ -973,6 +998,8 @@ this.recordButton.title = profileTypeObject.buttonTooltip;
 if (isProfiling) {
 this._launcherView.profileStarted();
 this._createTemporaryProfile(profileType);
+if (profileTypeObject.hasTemporaryView())
+this._showProfile(profileTypeObject.findTemporaryProfile());
 } else
 this._launcherView.profileFinished();
 },
@@ -1157,10 +1184,20 @@ __proto__: WebInspector.ProfilesPanel.prototype
 
 WebInspector.HeapProfilerPanel = function()
 {
-WebInspector.ProfilesPanel.call(this, "heap-profiler", new WebInspector.HeapSnapshotProfileType());
+var heapSnapshotProfileType = new WebInspector.HeapSnapshotProfileType();
+WebInspector.ProfilesPanel.call(this, "heap-profiler", heapSnapshotProfileType);
+this._singleProfileMode = false;
+this._registerProfileType(new WebInspector.TrackingHeapSnapshotProfileType(this));
+this._launcherView.addEventListener(WebInspector.MultiProfileLauncherView.EventTypes.ProfileTypeSelected, this._onProfileTypeSelected, this);
+this._launcherView._profileTypeChanged(heapSnapshotProfileType);
 }
 
 WebInspector.HeapProfilerPanel.prototype = {
+_createLauncherView: function()
+{
+return new WebInspector.MultiProfileLauncherView(this);
+},
+
 __proto__: WebInspector.ProfilesPanel.prototype
 }
 
@@ -1855,7 +1892,6 @@ this.dataGrid.show(this.element);
 this.viewSelectComboBox = new WebInspector.StatusBarComboBox(this._changeView.bind(this));
 
 var options = {};
-if (WebInspector.experimentsSettings.cpuFlameChart.isEnabled())
 options[WebInspector.CPUProfileView._TypeFlame] = this.viewSelectComboBox.createOption(WebInspector.UIString("Flame Chart"), "", WebInspector.CPUProfileView._TypeFlame);
 options[WebInspector.CPUProfileView._TypeHeavy] = this.viewSelectComboBox.createOption(WebInspector.UIString("Heavy (Bottom Up)"), "", WebInspector.CPUProfileView._TypeHeavy);
 options[WebInspector.CPUProfileView._TypeTree] = this.viewSelectComboBox.createOption(WebInspector.UIString("Tree (Top Down)"), "", WebInspector.CPUProfileView._TypeTree);
@@ -2410,6 +2446,15 @@ idToNode[node.id] = node;
 for (var i = 0; i < node.children.length; i++)
 stack.push(node.children[i]);
 }
+
+var topLevelNodes = this.profileHead.children;
+for (var i = 0; i < topLevelNodes.length; i++) {
+var node = topLevelNodes[i];
+if (node.functionName == "(garbage collector)") {
+this._gcNode = node;
+break;
+}
+}
 },
 
 
@@ -2725,10 +2770,6 @@ return this._data;
 createCell: function(columnIdentifier)
 {
 var cell = WebInspector.DataGridNode.prototype.createCell.call(this, columnIdentifier);
-if (columnIdentifier === "selector" && cell.firstChild) {
-cell.firstChild.title = this.rawData.selector;
-return cell;
-}
 
 if (columnIdentifier !== "source")
 return cell;
@@ -2756,7 +2797,7 @@ this.element.addStyleClass("profile-view");
 this.showTimeAsPercent = WebInspector.settings.createSetting("selectorProfilerShowTimeAsPercent", true);
 
 var columns = [
-{id: "selector", title: WebInspector.UIString("Selector"), width: "550px", sortable: true},
+{id: "selector", title: WebInspector.UIString("Selector"), width: "550px", sortable: true, longText: true},
 {id: "source", title: WebInspector.UIString("Source"), width: "100px", sortable: true},
 {id: "time", title: WebInspector.UIString("Total"), width: "72px", sort: WebInspector.DataGrid.Order.Descending, sortable: true},
 {id: "matches", title: WebInspector.UIString("Matches"), width: "72px", sortable: true}
@@ -3066,7 +3107,7 @@ this._cpuProfileView = cpuProfileView;
 this._windowLeft = 0.0;
 this._windowRight = 1.0;
 this._barHeight = 15;
-this._minWidth = 1;
+this._minWidth = 2;
 this._paddingLeft = 15;
 this._canvas.addEventListener("mousewheel", this._onMouseWheel.bind(this), false);
 this.element.addEventListener("click", this._onClick.bind(this), false);
@@ -3101,7 +3142,7 @@ return (time - this._minimumBoundaries) * this._timeToPixel + this.paddingLeft;
 
 formatTime: function(value)
 {
-return Number.secondsToString((value + this._minimumBoundaries) / 1000);
+return WebInspector.UIString("%s\u2009ms", Number.withThousandsSeparator(Math.round(value + this._minimumBoundaries)));
 },
 
 maximumBoundary: function()
@@ -3180,6 +3221,9 @@ WebInspector.FlameChart.ColorGenerator = function()
 {
 this._colorPairs = {};
 this._currentColorIndex = 0;
+this._colorPairs["(idle)::0"] = this._createPair(0, 50);
+this._colorPairs["(program)::0"] = this._createPair(5, 50);
+this._colorPairs["(garbage collector)::0"] = this._createPair(10, 50);
 }
 
 WebInspector.FlameChart.ColorGenerator.prototype = {
@@ -3188,12 +3232,18 @@ _colorPairForID: function(id)
 {
 var colorPairs = this._colorPairs;
 var colorPair = colorPairs[id];
-if (!colorPair) {
-var currentColorIndex = ++this._currentColorIndex;
-var hue = (currentColorIndex * 5 + 11 * (currentColorIndex % 2)) % 360;
-colorPairs[id] = colorPair = {highlighted: "hsla(" + hue + ", 100%, 33%, 0.7)", normal: "hsla(" + hue + ", 100%, 66%, 0.7)"};
-}
+if (!colorPair)
+colorPairs[id] = colorPair = this._createPair(++this._currentColorIndex);
 return colorPair;
+},
+
+
+_createPair: function(index, sat)
+{
+var hue = (index * 7 + 12 * (index % 2)) % 360;
+if (typeof sat !== "number")
+sat = 100;
+return {highlighted: "hsla(" + hue + ", " + sat + "%, 33%, 0.7)", normal: "hsla(" + hue + ", " + sat + "%, 66%, 0.7)"}
 }
 }
 
@@ -3322,6 +3372,7 @@ return null;
 
 var samples = this._cpuProfileView.samples;
 var idToNode = this._cpuProfileView._idToNode;
+var gcNode = this._cpuProfileView._gcNode;
 var samplesCount = samples.length;
 
 var index = 0;
@@ -3342,6 +3393,21 @@ stackTrace.pop();
 var depth = 0;
 node = stackTrace.pop();
 var intervalIndex;
+
+
+if (node === gcNode) {
+while (depth < openIntervals.length) {
+intervalIndex = openIntervals[depth].index;
+entries[intervalIndex].duration += 1;
+++depth;
+}
+
+if (openIntervals.length > 0 && openIntervals.peekLast().node === node) {
+entries[intervalIndex].selfTime += 1;
+continue;
+}
+}
+
 while (node && depth < openIntervals.length && node === openIntervals[depth].node) {
 intervalIndex = openIntervals[depth].index;
 entries[intervalIndex].duration += 1;
@@ -3415,6 +3481,8 @@ if (this._cpuProfileView.samples) {
 pushEntryInfoRow(WebInspector.UIString("Self time"), Number.secondsToString(entry.selfTime / 1000, true));
 pushEntryInfoRow(WebInspector.UIString("Total time"), Number.secondsToString(entry.duration / 1000, true));
 }
+if (node.url)
+pushEntryInfoRow(WebInspector.UIString("URL"), node.url + ":" + node.lineNumber);
 pushEntryInfoRow(WebInspector.UIString("Aggregated self time"), Number.secondsToString(node.selfTime / 1000, true));
 pushEntryInfoRow(WebInspector.UIString("Aggregated total time"), Number.secondsToString(node.totalTime / 1000, true));
 return entryInfo;
@@ -3525,7 +3593,7 @@ _entryToAnchorBox: function(entry, anchorBox)
 {
 anchorBox.x = Math.floor(entry.startTime * this._timeToPixel) - this._pixelWindowLeft + this._paddingLeft;
 anchorBox.y = this._canvas.height / window.devicePixelRatio - (entry.depth + 1) * this._barHeight;
-anchorBox.width = Math.floor(entry.duration * this._timeToPixel);
+anchorBox.width = Math.max(Math.ceil(entry.duration * this._timeToPixel), this._minWidth);
 anchorBox.height = this._barHeight;
 if (anchorBox.x < 0) {
 anchorBox.width += anchorBox.x;
@@ -3555,8 +3623,8 @@ var barHeight = this._barHeight;
 var context = this._canvas.getContext("2d");
 var textPaddingLeft = 2;
 context.scale(ratio, ratio);
-context.font = (barHeight - 3) + "px sans-serif";
-context.textBaseline = "top";
+context.font = (barHeight - 4) + "px " + window.getComputedStyle(this.element, null).getPropertyValue("font-family");
+context.textBaseline = "alphabetic";
 this._dotsWidth = context.measureText("\u2026").width;
 var visibleTimeLeft = this._timeWindowLeft - this._paddingLeftTime;
 
@@ -3569,8 +3637,6 @@ break;
 if ((startTime + entry.duration) < visibleTimeLeft)
 continue;
 this._entryToAnchorBox(entry, anchorBox);
-if (anchorBox.width < this._minWidth)
-continue;
 
 var colorPair = entry.colorPair;
 var color;
@@ -3589,29 +3655,34 @@ var widthText = anchorBox.width - textPaddingLeft + anchorBox.x - xText;
 var title = this._prepareText(context, entry.node.functionName, widthText);
 if (title) {
 context.fillStyle = "#333";
-context.fillText(title, xText + textPaddingLeft, anchorBox.y - 1);
+context.fillText(title, xText + textPaddingLeft, anchorBox.y + barHeight - 4);
 }
 }
 
 var entryInfo = this._prepareHighlightedEntryInfo();
 if (entryInfo)
-this._printEntryInfo(context, entryInfo, 0, 25);
+this._printEntryInfo(context, entryInfo, 0, 25, width);
 },
 
-_printEntryInfo: function(context, entryInfo, x, y)
+_printEntryInfo: function(context, entryInfo, x, y, width)
 {
 const lineHeight = 18;
-const maxTextWidth = 290;
 const paddingLeft = 10;
 const paddingTop = 5;
-const paddingLeftText = 10;
 var maxTitleWidth = 0;
-context.font = "bold " + (this._barHeight - 3) + "px sans-serif";
+var basicFont = "100% " + window.getComputedStyle(this.element, null).getPropertyValue("font-family");
+context.font = "bold " + basicFont;
+context.textBaseline = "top";
 for (var i = 0; i < entryInfo.length; ++i)
 maxTitleWidth = Math.max(maxTitleWidth, context.measureText(entryInfo[i].title).width);
 
+var maxTextWidth = 0;
+for (var i = 0; i < entryInfo.length; ++i)
+maxTextWidth = Math.max(maxTextWidth, context.measureText(entryInfo[i].text).width);
+maxTextWidth = Math.min(maxTextWidth, width - 2 * paddingLeft - maxTitleWidth);
+
 context.beginPath();
-context.rect(x, y, maxTextWidth + 5, lineHeight * entryInfo.length + 5);
+context.rect(x, y, maxTitleWidth + maxTextWidth + 5, lineHeight * entryInfo.length + 5);
 context.strokeStyle = "rgba(0,0,0,0)";
 context.fillStyle = "rgba(254,254,254,0.8)";
 context.fill();
@@ -3621,9 +3692,9 @@ context.fillStyle = "#333";
 for (var i = 0; i < entryInfo.length; ++i)
 context.fillText(entryInfo[i].title, x + paddingLeft, y + lineHeight * i);
 
-context.font = (this._barHeight - 3) + "px sans-serif";
+context.font = basicFont;
 for (var i = 0; i < entryInfo.length; ++i) {
-var text = this._prepareText(context, entryInfo[i].text, maxTextWidth - maxTitleWidth - 2 * paddingLeft);
+var text = this._prepareText(context, entryInfo[i].text, maxTextWidth);
 context.fillText(text, x + paddingLeft + maxTitleWidth + paddingLeft, y + lineHeight * i);
 }
 },
@@ -5836,7 +5907,6 @@ __proto__: WebInspector.HeapSnapshotContainmentDataGrid.prototype
 }
 
 
-
 WebInspector.HeapSnapshotConstructorsDataGrid = function()
 {
 var columns = [
@@ -5851,6 +5921,18 @@ this._profileIndex = -1;
 this._topLevelNodes = [];
 
 this._objectIdToSelect = null;
+}
+
+
+WebInspector.HeapSnapshotConstructorsDataGrid.Request = function(minNodeId, maxNodeId)
+{
+if (typeof minNodeId === "number") {
+this.key = minNodeId + ".." + maxNodeId;
+this.filter = "function(node) { var id = node.id(); return id > " + minNodeId + " && id <= " + maxNodeId + "; }";
+} else {
+this.key = "allObjects";
+this.filter = null;
+}
 }
 
 WebInspector.HeapSnapshotConstructorsDataGrid.prototype = {
@@ -5899,39 +5981,56 @@ this._objectIdToSelect = null;
 }
 },
 
-_aggregatesReceived: function(key, aggregates)
+
+setSelectionRange: function(minNodeId, maxNodeId)
 {
-for (var constructor in aggregates)
-this.appendTopLevelNode(new WebInspector.HeapSnapshotConstructorNode(this, constructor, aggregates[constructor], key));
-this.sortingChanged();
+this._populateChildren(new WebInspector.HeapSnapshotConstructorsDataGrid.Request(minNodeId, maxNodeId));
 },
 
-_populateChildren: function()
+_aggregatesReceived: function(key, aggregates)
 {
-
+this._requestInProgress = null;
+if (this._nextRequest) {
+this.snapshot.aggregates(false, this._nextRequest.key, this._nextRequest.filter, this._aggregatesReceived.bind(this, this._nextRequest.key));
+this._requestInProgress = this._nextRequest;
+this._nextRequest = null;
+}
 this.dispose();
 this.removeTopLevelNodes();
 this.resetSortingCache();
+for (var constructor in aggregates)
+this.appendTopLevelNode(new WebInspector.HeapSnapshotConstructorNode(this, constructor, aggregates[constructor], key));
+this.sortingChanged();
+this._lastKey = key;
+},
 
-var key = this._profileIndex === -1 ? "allObjects" : this._minNodeId + ".." + this._maxNodeId;
-var filter = this._profileIndex === -1 ? null : "function(node) { var id = node.id(); return id > " + this._minNodeId + " && id <= " + this._maxNodeId + "; }";
 
-this.snapshot.aggregates(false, key, filter, this._aggregatesReceived.bind(this, key));
+_populateChildren: function(request)
+{
+request = request || new WebInspector.HeapSnapshotConstructorsDataGrid.Request();
+
+if (this._requestInProgress) {
+this._nextRequest = this._requestInProgress.key === request.key ? null : request;
+return;
+}
+if (this._lastKey === request.key)
+return;
+this._requestInProgress = request;
+this.snapshot.aggregates(false, request.key, request.filter, this._aggregatesReceived.bind(this, request.key));
 },
 
 filterSelectIndexChanged: function(profiles, profileIndex)
 {
 this._profileIndex = profileIndex;
 
-delete this._maxNodeId;
-delete this._minNodeId;
-
-if (this._profileIndex !== -1) {
-this._minNodeId = profileIndex > 0 ? profiles[profileIndex - 1].maxJSObjectId : 0;
-this._maxNodeId = profiles[profileIndex].maxJSObjectId;
+var request = null;
+if (profileIndex !== -1) {
+var minNodeId = profileIndex > 0 ? profiles[profileIndex - 1].maxJSObjectId : 0;
+var maxNodeId = profiles[profileIndex].maxJSObjectId;
+request = new WebInspector.HeapSnapshotConstructorsDataGrid.Request(minNodeId, maxNodeId)
 }
 
-this._populateChildren();
+this._populateChildren(request);
 },
 
 __proto__: WebInspector.HeapSnapshotViewportDataGrid.prototype
@@ -7805,6 +7904,12 @@ this.element.addStyleClass("heap-snapshot-view");
 this.parent = parent;
 this.parent.addEventListener("profile added", this._onProfileHeaderAdded, this);
 
+if (profile._profileType.id === WebInspector.TrackingHeapSnapshotProfileType.TypeId) {
+this._trackingOverviewGrid = new WebInspector.HeapTrackingOverviewGrid(profile);
+this._trackingOverviewGrid.addEventListener(WebInspector.HeapTrackingOverviewGrid.IdsRangeChanged, this._onIdsRangeChanged.bind(this));
+this._trackingOverviewGrid.show(this.element);
+}
+
 this.viewsContainer = document.createElement("div");
 this.viewsContainer.addStyleClass("views-container");
 this.element.appendChild(this.viewsContainer);
@@ -7825,6 +7930,10 @@ this.constructorsDataGrid.element.addStyleClass("class-view-grid");
 this.constructorsDataGrid.element.addEventListener("mousedown", this._mouseDownInContentsGrid.bind(this), true);
 this.constructorsDataGrid.show(this.constructorsView.element);
 this.constructorsDataGrid.addEventListener(WebInspector.DataGrid.Events.SelectedNode, this._selectionChanged, this);
+
+this.dataGrid =   (this.constructorsDataGrid);
+this.currentView = this.constructorsView;
+this.currentView.show(this.viewsContainer);
 
 this.diffView = new WebInspector.View();
 this.diffView.element.addStyleClass("view");
@@ -7862,40 +7971,30 @@ this.retainmentDataGrid.addEventListener(WebInspector.DataGrid.Events.SelectedNo
 this.retainmentView.show(this.element);
 this.retainmentDataGrid.reset();
 
-this.dataGrid =   (this.constructorsDataGrid);
-this.currentView = this.constructorsView;
-
-this.viewSelectElement = document.createElement("select");
-this.viewSelectElement.className = "status-bar-item";
-this.viewSelectElement.addEventListener("change", this._onSelectedViewChanged.bind(this), false);
+this.viewSelect = new WebInspector.StatusBarComboBox(this._onSelectedViewChanged.bind(this));
 
 this.views = [{title: "Summary", view: this.constructorsView, grid: this.constructorsDataGrid},
 {title: "Comparison", view: this.diffView, grid: this.diffDataGrid},
 {title: "Containment", view: this.containmentView, grid: this.containmentDataGrid},
 {title: "Dominators", view: this.dominatorView, grid: this.dominatorDataGrid}];
 this.views.current = 0;
-for (var i = 0; i < this.views.length; ++i) {
-var view = this.views[i];
-var option = document.createElement("option");
-option.label = WebInspector.UIString(view.title);
-this.viewSelectElement.appendChild(option);
-}
+for (var i = 0; i < this.views.length; ++i)
+this.viewSelect.createOption(WebInspector.UIString(this.views[i].title));
 
 this._profileUid = profile.uid;
 this._profileTypeId = profile.profileType().id;
 
-this.baseSelectElement = document.createElement("select");
-this.baseSelectElement.className = "status-bar-item";
-this.baseSelectElement.addEventListener("change", this._changeBase.bind(this), false);
+this.baseSelect = new WebInspector.StatusBarComboBox(this._changeBase.bind(this));
+this.baseSelect.element.addStyleClass("hidden");
 this._updateBaseOptions();
 
-this.filterSelectElement = document.createElement("select");
-this.filterSelectElement.className = "status-bar-item";
-this.filterSelectElement.addEventListener("change", this._changeFilter.bind(this), false);
+this.filterSelect = new WebInspector.StatusBarComboBox(this._changeFilter.bind(this));
 this._updateFilterOptions();
 
 this.helpButton = new WebInspector.StatusBarButton("", "heap-snapshot-help-status-bar-item status-bar-item");
 this.helpButton.addEventListener("click", this._helpClicked, this);
+
+this.selectedSizeText = new WebInspector.StatusBarText("");
 
 this._popoverHelper = new WebInspector.ObjectPopoverHelper(this.element, this._getHoverAnchor.bind(this), this._resolveObjectForPopover.bind(this), undefined, true);
 
@@ -7913,16 +8012,26 @@ break;
 }
 
 if (profileIndex > 0)
-this.baseSelectElement.selectedIndex = profileIndex - 1;
+this.baseSelect.setSelectedIndex(profileIndex - 1);
 else
-this.baseSelectElement.selectedIndex = profileIndex;
+this.baseSelect.setSelectedIndex(profileIndex);
 this.dataGrid.setDataSource(heapSnapshotProxy);
 }
 }
 
 WebInspector.HeapSnapshotView.prototype = {
+_onIdsRangeChanged: function(event)
+{
+var minId = event.data.minId;
+var maxId = event.data.maxId;
+this.selectedSizeText.setText(WebInspector.UIString("Selected size: %s", Number.bytesToString(event.data.size)));
+if (this.constructorsDataGrid.snapshot)
+this.constructorsDataGrid.setSelectionRange(minId, maxId);
+},
+
 dispose: function()
 {
+this.parent.removeEventListener("profile added", this._onProfileHeaderAdded, this);
 this.profile.dispose();
 if (this.baseProfile)
 this.baseProfile.dispose();
@@ -7935,15 +8044,7 @@ this.retainmentDataGrid.dispose();
 
 get statusBarItems()
 {
-
-function appendArrowImage(element, hidden)
-{
-var span = document.createElement("span");
-span.className = "status-bar-select-container" + (hidden ? " hidden" : "");
-span.appendChild(element);
-return span;
-}
-return [appendArrowImage(this.viewSelectElement), appendArrowImage(this.baseSelectElement, true), appendArrowImage(this.filterSelectElement), this.helpButton.element];
+return [this.viewSelect.element, this.baseSelect.element, this.filterSelect.element, this.helpButton.element, this.selectedSizeText.element];
 },
 
 get profile()
@@ -7959,17 +8060,10 @@ return this.parent.getProfile(this._profileTypeId, this._baseProfileUid);
 wasShown: function()
 {
 
-this.profile.load(profileCallback1.bind(this));
-
-function profileCallback1() {
+this.profile.load(profileCallback.bind(this));
+function profileCallback() {
 if (this.baseProfile)
-this.baseProfile.load(profileCallback2.bind(this));
-else
-profileCallback2.call(this);
-}
-
-function profileCallback2() {
-this.currentView.show(this.viewsContainer);
+this.baseProfile.load(function() { });
 }
 },
 
@@ -8125,10 +8219,10 @@ child = child.traverseNextNode(false, null, true);
 
 _changeBase: function()
 {
-if (this._baseProfileUid === this._profiles()[this.baseSelectElement.selectedIndex].uid)
+if (this._baseProfileUid === this._profiles()[this.baseSelect.selectedIndex()].uid)
 return;
 
-this._baseProfileUid = this._profiles()[this.baseSelectElement.selectedIndex].uid;
+this._baseProfileUid = this._profiles()[this.baseSelect.selectedIndex()].uid;
 var dataGrid =   (this.dataGrid);
 
 if (dataGrid.snapshot)
@@ -8146,12 +8240,12 @@ this.performSearch(this.currentQuery, this._searchFinishedCallback);
 
 _changeFilter: function()
 {
-var profileIndex = this.filterSelectElement.selectedIndex - 1;
+var profileIndex = this.filterSelect.selectedIndex() - 1;
 this.dataGrid.filterSelectIndexChanged(this._profiles(), profileIndex);
 
 WebInspector.notifications.dispatchEventToListeners(WebInspector.UserMetrics.UserAction, {
 action: WebInspector.UserMetrics.UserActionNames.HeapSnapshotFilterChanged,
-label: this.filterSelectElement[this.filterSelectElement.selectedIndex].label
+label: this.filterSelect.selectedOption().label
 });
 
 if (!this.currentQuery || !this._searchFinishedCallback || !this._searchResults)
@@ -8231,12 +8325,13 @@ event.consume(true);
 changeView: function(viewTitle, callback)
 {
 var viewIndex = null;
-for (var i = 0; i < this.views.length; ++i)
+for (var i = 0; i < this.views.length; ++i) {
 if (this.views[i].title === viewTitle) {
 viewIndex = i;
 break;
 }
-if (this.views.current === viewIndex) {
+}
+if (this.views.current === viewIndex || viewIndex == null) {
 setTimeout(callback, 0);
 return;
 }
@@ -8250,7 +8345,7 @@ callback();
 }
 this.views[viewIndex].grid.addEventListener(WebInspector.HeapSnapshotSortableDataGrid.Events.ContentShown, dataGridContentShown, this);
 
-this.viewSelectElement.selectedIndex = viewIndex;
+this.viewSelect.setSelectedIndex(viewIndex);
 this._changeView(viewIndex);
 },
 
@@ -8269,7 +8364,7 @@ if (dataGrid.snapshot !== snapshotProxy)
 dataGrid.setDataSource(snapshotProxy);
 if (dataGrid === this.diffDataGrid) {
 if (!this._baseProfileUid)
-this._baseProfileUid = this._profiles()[this.baseSelectElement.selectedIndex].uid;
+this._baseProfileUid = this._profiles()[this.baseSelect.selectedIndex()].uid;
 this.baseProfile.load(didLoadBaseSnaphot.bind(this));
 }
 }
@@ -8289,14 +8384,24 @@ this._changeView(event.target.selectedIndex);
 _updateSelectorsVisibility: function()
 {
 if (this.currentView === this.diffView)
-this.baseSelectElement.parentElement.removeStyleClass("hidden");
+this.baseSelect.element.removeStyleClass("hidden");
 else
-this.baseSelectElement.parentElement.addStyleClass("hidden");
+this.baseSelect.element.addStyleClass("hidden");
 
-if (this.currentView === this.constructorsView)
-this.filterSelectElement.parentElement.removeStyleClass("hidden");
-else
-this.filterSelectElement.parentElement.addStyleClass("hidden");
+if (this.currentView === this.constructorsView) {
+if (this._trackingOverviewGrid) {
+this._trackingOverviewGrid.element.removeStyleClass("hidden");
+this._trackingOverviewGrid.update();
+this.viewsContainer.addStyleClass("reserve-80px-at-top");
+}
+this.filterSelect.element.removeStyleClass("hidden");
+} else {
+this.filterSelect.element.addStyleClass("hidden");
+if (this._trackingOverviewGrid) {
+this._trackingOverviewGrid.element.addStyleClass("hidden");
+this.viewsContainer.removeStyleClass("reserve-80px-at-top");
+}
+}
 },
 
 _changeView: function(selectedIndex)
@@ -8437,6 +8542,8 @@ _updateRetainmentViewHeight: function(height)
 {
 height = Number.constrain(height, Preferences.minConsoleHeight, this.element.clientHeight - Preferences.minConsoleHeight);
 this.viewsContainer.style.bottom = (height + this.retainmentViewHeader.clientHeight) + "px";
+if (this._trackingOverviewGrid && this.currentView === this.constructorsView)
+this.viewsContainer.addStyleClass("reserve-80px-at-top");
 this.retainmentView.element.style.height = height + "px";
 this.retainmentViewHeader.style.bottom = height + "px";
 this.currentView.doResize();
@@ -8446,16 +8553,14 @@ _updateBaseOptions: function()
 {
 var list = this._profiles();
 
-if (this.baseSelectElement.length === list.length)
+if (this.baseSelect.size() === list.length)
 return;
 
-for (var i = this.baseSelectElement.length, n = list.length; i < n; ++i) {
-var baseOption = document.createElement("option");
+for (var i = this.baseSelect.size(), n = list.length; i < n; ++i) {
 var title = list[i].title;
 if (WebInspector.ProfilesPanelDescriptor.isUserInitiatedProfile(title))
 title = WebInspector.UIString("Snapshot %d", WebInspector.ProfilesPanelDescriptor.userInitiatedProfileIndex(title));
-baseOption.label = title;
-this.baseSelectElement.appendChild(baseOption);
+this.baseSelect.createOption(title);
 }
 },
 
@@ -8463,20 +8568,16 @@ _updateFilterOptions: function()
 {
 var list = this._profiles();
 
-if (this.filterSelectElement.length - 1 === list.length)
+if (this.filterSelect.size() - 1 === list.length)
 return;
 
-if (!this.filterSelectElement.length) {
-var filterOption = document.createElement("option");
-filterOption.label = WebInspector.UIString("All objects");
-this.filterSelectElement.appendChild(filterOption);
-}
+if (!this.filterSelect.size())
+this.filterSelect.createOption(WebInspector.UIString("All objects"));
 
 if (this.profile.fromFile())
 return;
-for (var i = this.filterSelectElement.length - 1, n = list.length; i < n; ++i) {
+for (var i = this.filterSelect.size() - 1, n = list.length; i < n; ++i) {
 var profile = list[i];
-var filterOption = document.createElement("option");
 var title = list[i].title;
 if (WebInspector.ProfilesPanelDescriptor.isUserInitiatedProfile(title)) {
 var profileIndex = WebInspector.ProfilesPanelDescriptor.userInitiatedProfileIndex(title);
@@ -8485,8 +8586,7 @@ title = WebInspector.UIString("Objects allocated before Snapshot %d", profileInd
 else
 title = WebInspector.UIString("Objects allocated between Snapshots %d and %d", profileIndex - 1, profileIndex);
 }
-filterOption.label = title;
-this.filterSelectElement.appendChild(filterOption);
+this.filterSelect.createOption(title);
 }
 },
 
@@ -8503,14 +8603,80 @@ __proto__: WebInspector.View.prototype
 }
 
 
+WebInspector.HeapProfilerDispatcher = function()
+{
+this._dispatchers = [];
+InspectorBackend.registerHeapProfilerDispatcher(this);
+}
+
+WebInspector.HeapProfilerDispatcher.prototype = {
+
+register: function(dispatcher)
+{
+this._dispatchers.push(dispatcher);
+},
+
+_genericCaller: function(eventName)
+{
+var args = Array.prototype.slice.call(arguments.callee.caller.arguments);
+for (var i = 0; i < this._dispatchers.length; ++i)
+this._dispatchers[i][eventName].apply(this._dispatchers[i], args);
+},
+
+
+heapStatsUpdate: function(samples)
+{
+this._genericCaller("heapStatsUpdate");
+},
+
+
+lastSeenObjectId: function(lastSeenObjectId, timestamp)
+{
+this._genericCaller("lastSeenObjectId");
+},
+
+
+addProfileHeader: function(profileHeader)
+{
+this._genericCaller("addProfileHeader");
+},
+
+
+addHeapSnapshotChunk: function(uid, chunk)
+{
+this._genericCaller("addHeapSnapshotChunk");
+},
+
+
+finishHeapSnapshot: function(uid)
+{
+this._genericCaller("finishHeapSnapshot");
+},
+
+
+reportHeapSnapshotProgress: function(done, total)
+{
+this._genericCaller("reportHeapSnapshotProgress");
+},
+
+
+resetProfiles: function()
+{
+this._genericCaller("resetProfiles");
+}
+}
+
+WebInspector.HeapProfilerDispatcher._dispatcher = new WebInspector.HeapProfilerDispatcher();
+
 
 WebInspector.HeapSnapshotProfileType = function()
 {
 WebInspector.ProfileType.call(this, WebInspector.HeapSnapshotProfileType.TypeId, WebInspector.UIString("Take Heap Snapshot"));
-InspectorBackend.registerHeapProfilerDispatcher(this);
+WebInspector.HeapProfilerDispatcher._dispatcher.register(this);
 }
 
 WebInspector.HeapSnapshotProfileType.TypeId = "HEAP";
+WebInspector.HeapSnapshotProfileType.SnapshotReceived = "SnapshotReceived";
 
 WebInspector.HeapSnapshotProfileType.prototype = {
 
@@ -8535,6 +8701,16 @@ buttonClicked: function()
 {
 this._takeHeapSnapshot();
 return false;
+},
+
+
+heapStatsUpdate: function(samples)
+{
+},
+
+
+lastSeenObjectId: function(lastSeenObjectId, timestamp)
+{
 },
 
 get treeItemTitle()
@@ -8572,7 +8748,12 @@ WebInspector.userMetrics.ProfilesHeapProfileTaken.record();
 
 addProfileHeader: function(profileHeader)
 {
-this.addProfile(this.createProfile(profileHeader));
+if (!this.findTemporaryProfile())
+return;
+var profile = this.createProfile(profileHeader);
+profile._profileSamples = this._profileSamples;
+this._profileSamples = null;
+this.addProfile(profile);
 },
 
 
@@ -8619,7 +8800,157 @@ _requestProfilesFromBackend: function(populateCallback)
 HeapProfilerAgent.getProfileHeaders(populateCallback);
 },
 
+_snapshotReceived: function(profile)
+{
+this.dispatchEventToListeners(WebInspector.HeapSnapshotProfileType.SnapshotReceived, profile);
+},
+
 __proto__: WebInspector.ProfileType.prototype
+}
+
+
+
+WebInspector.TrackingHeapSnapshotProfileType = function(profilesPanel)
+{
+WebInspector.ProfileType.call(this, WebInspector.TrackingHeapSnapshotProfileType.TypeId, WebInspector.UIString("Record Heap Allocations"));
+this._profilesPanel = profilesPanel;
+WebInspector.HeapProfilerDispatcher._dispatcher.register(this);
+}
+
+WebInspector.TrackingHeapSnapshotProfileType.TypeId = "HEAP-RECORD";
+
+WebInspector.TrackingHeapSnapshotProfileType.HeapStatsUpdate = "HeapStatsUpdate";
+WebInspector.TrackingHeapSnapshotProfileType.TrackingStarted = "TrackingStarted";
+WebInspector.TrackingHeapSnapshotProfileType.TrackingStopped = "TrackingStopped";
+
+WebInspector.TrackingHeapSnapshotProfileType.prototype = {
+
+
+heapStatsUpdate: function(samples)
+{
+if (!this._profileSamples)
+return;
+var index;
+for (var i = 0; i < samples.length; i += 3) {
+index = samples[i];
+var count = samples[i+1];
+var size  = samples[i+2];
+this._profileSamples.sizes[index] = size;
+if (!this._profileSamples.max[index] || size > this._profileSamples.max[index])
+this._profileSamples.max[index] = size;
+}
+this._lastUpdatedIndex = index;
+},
+
+
+lastSeenObjectId: function(lastSeenObjectId, timestamp)
+{
+var profileSamples = this._profileSamples;
+if (!profileSamples)
+return;
+var currentIndex = Math.max(profileSamples.ids.length, profileSamples.max.length - 1);
+profileSamples.ids[currentIndex] = lastSeenObjectId;
+if (!profileSamples.max[currentIndex]) {
+profileSamples.max[currentIndex] = 0;
+profileSamples.sizes[currentIndex] = 0;
+}
+profileSamples.timestamps[currentIndex] = timestamp;
+if (profileSamples.totalTime < timestamp - profileSamples.timestamps[0])
+profileSamples.totalTime *= 2;
+this.dispatchEventToListeners(WebInspector.TrackingHeapSnapshotProfileType.HeapStatsUpdate, this._profileSamples);
+var profile = this.findTemporaryProfile();
+profile.sidebarElement.wait = true;
+if (profile.sidebarElement && !profile.sidebarElement.wait)
+profile.sidebarElement.wait = true;
+},
+
+
+hasTemporaryView: function()
+{
+return true;
+},
+
+get buttonTooltip()
+{
+return this._recording ? WebInspector.UIString("Stop recording heap profile.") : WebInspector.UIString("Start recording heap profile.");
+},
+
+
+isInstantProfile: function()
+{
+return false;
+},
+
+
+buttonClicked: function()
+{
+return this._toggleRecording();
+},
+
+_startRecordingProfile: function()
+{
+this._lastSeenIndex = -1;
+this._profileSamples = {
+'sizes': [],
+'ids': [],
+'timestamps': [],
+'max': [],
+'totalTime': 30000
+};
+this._recording = true;
+HeapProfilerAgent.startTrackingHeapObjects();
+this.dispatchEventToListeners(WebInspector.TrackingHeapSnapshotProfileType.TrackingStarted);
+},
+
+_stopRecordingProfile: function()
+{
+HeapProfilerAgent.stopTrackingHeapObjects();
+HeapProfilerAgent.takeHeapSnapshot(true);
+this._recording = false;
+this.dispatchEventToListeners(WebInspector.TrackingHeapSnapshotProfileType.TrackingStopped);
+},
+
+_toggleRecording: function()
+{
+if (this._recording)
+this._stopRecordingProfile();
+else
+this._startRecordingProfile();
+return this._recording;
+},
+
+get treeItemTitle()
+{
+return WebInspector.UIString("HEAP TIMELINES");
+},
+
+get description()
+{
+return WebInspector.UIString("Record JavaScript object allocations over time. Use this profile type to isolate memory leaks.");
+},
+
+_reset: function()
+{
+WebInspector.HeapSnapshotProfileType.prototype._reset.call(this);
+if (this._recording)
+this._stopRecordingProfile();
+this._profileSamples = null;
+this._lastSeenIndex = -1;
+},
+
+
+createTemporaryProfile: function(title)
+{
+title = title || WebInspector.UIString("Recording\u2026");
+return new WebInspector.HeapProfileHeader(this, title);
+},
+
+
+_requestProfilesFromBackend: function(populateCallback)
+{
+},
+
+__proto__: WebInspector.HeapSnapshotProfileType.prototype
 }
 
 
@@ -8650,6 +8981,8 @@ return new WebInspector.HeapSnapshotView(profilesPanel, this);
 
 load: function(callback)
 {
+if (this.uid === -1)
+return;
 if (this._snapshotProxy) {
 callback(this._snapshotProxy);
 return;
@@ -8703,6 +9036,11 @@ if (this._receiver)
 this._receiver.close();
 else if (this._snapshotProxy)
 this._snapshotProxy.dispose();
+if (this._view) {
+var view = this._view;
+this._view = null;
+view.dispose();
+}
 },
 
 
@@ -8749,6 +9087,7 @@ this._updateSnapshotStatus();
 var worker =   (this._snapshotProxy.worker);
 this.isTemporary = false;
 worker.startCheckingForLongRunningCalls();
+this._profileType._snapshotReceived(this);
 },
 
 finishHeapSnapshot: function()
@@ -8840,6 +9179,313 @@ break;
 default:
 this._snapshotHeader.sidebarElement.subtitle = WebInspector.UIString("'%s' error %d", reader.fileName(), e.target.error.code);
 }
+}
+}
+
+
+WebInspector.HeapTrackingOverviewGrid = function(heapProfileHeader)
+{
+WebInspector.View.call(this);
+this.registerRequiredCSS("flameChart.css");
+this.element.id = "heap-recording-view";
+
+this._overviewContainer = this.element.createChild("div", "overview-container");
+this._overviewGrid = new WebInspector.OverviewGrid("heap-recording");
+this._overviewCanvas = this._overviewContainer.createChild("canvas", "heap-recording-overview-canvas");
+this._overviewContainer.appendChild(this._overviewGrid.element);
+this._overviewCalculator = new WebInspector.HeapTrackingOverviewGrid.OverviewCalculator();
+this._overviewGrid.addEventListener(WebInspector.OverviewGrid.Events.WindowChanged, this._onWindowChanged, this);
+
+this._profileSamples = heapProfileHeader._profileSamples || heapProfileHeader._profileType._profileSamples;
+if (heapProfileHeader.isTemporary) {
+this._profileType = heapProfileHeader._profileType;
+this._profileType.addEventListener(WebInspector.TrackingHeapSnapshotProfileType.HeapStatsUpdate, this._onHeapStatsUpdate, this);
+this._profileType.addEventListener(WebInspector.TrackingHeapSnapshotProfileType.TrackingStopped, this._onStopTracking, this);
+}
+var timestamps = this._profileSamples.timestamps;
+var totalTime = this._profileSamples.totalTime;
+this._windowLeft = 0.0;
+this._windowRight = totalTime && timestamps.length ? (timestamps[timestamps.length - 1] - timestamps[0]) / totalTime : 1.0;
+this._overviewGrid.setWindow(this._windowLeft, this._windowRight);
+this._yScale = new WebInspector.HeapTrackingOverviewGrid.SmoothScale();
+this._xScale = new WebInspector.HeapTrackingOverviewGrid.SmoothScale();
+}
+
+WebInspector.HeapTrackingOverviewGrid.IdsRangeChanged = "IdsRangeChanged";
+
+WebInspector.HeapTrackingOverviewGrid.prototype = {
+_onStopTracking: function(event)
+{
+this._profileType.removeEventListener(WebInspector.TrackingHeapSnapshotProfileType.HeapStatsUpdate, this._onHeapStatsUpdate, this);
+this._profileType.removeEventListener(WebInspector.TrackingHeapSnapshotProfileType.TrackingStopped, this._onStopTracking, this);
+},
+
+_onHeapStatsUpdate: function(event)
+{
+this._profileSamples = event.data;
+this._scheduleUpdate();
+},
+
+
+_drawOverviewCanvas: function(width, height)
+{
+if (!this._profileSamples)
+return;
+var profileSamples = this._profileSamples;
+var sizes = profileSamples.sizes;
+var topSizes = profileSamples.max;
+var timestamps = profileSamples.timestamps;
+var startTime = timestamps[0];
+var endTime = timestamps[timestamps.length - 1];
+
+var scaleFactor = this._xScale.nextScale(width / profileSamples.totalTime);
+var maxSize = 0;
+
+function aggregateAndCall(sizes, callback)
+{
+var size = 0;
+var currentX = 0;
+for (var i = 1; i < timestamps.length; ++i) {
+var x = Math.floor((timestamps[i] - startTime) * scaleFactor);
+if (x !== currentX) {
+if (size)
+callback(currentX, size);
+size = 0;
+currentX = x;
+}
+size += sizes[i];
+}
+callback(currentX, size);
+}
+
+
+function maxSizeCallback(x, size)
+{
+maxSize = Math.max(maxSize, size);
+}
+
+aggregateAndCall(sizes, maxSizeCallback);
+
+var yScaleFactor = this._yScale.nextScale(maxSize ? height / (maxSize * 1.1) : 0.0);
+
+this._overviewCanvas.width = width * window.devicePixelRatio;
+this._overviewCanvas.height = height * window.devicePixelRatio;
+this._overviewCanvas.style.width = width + "px";
+this._overviewCanvas.style.height = height + "px";
+
+var context = this._overviewCanvas.getContext("2d");
+context.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+context.beginPath();
+context.lineWidth = 2;
+context.strokeStyle = "rgba(192, 192, 192, 0.6)";
+var currentX = (endTime - startTime) * scaleFactor;
+context.moveTo(currentX, height - 1);
+context.lineTo(currentX, 0);
+context.stroke();
+context.closePath();
+
+var gridY;
+var gridValue;
+var gridLabelHeight = 14;
+if (yScaleFactor) {
+const maxGridValue = (height - gridLabelHeight) / yScaleFactor;
+
+
+
+gridValue = Math.pow(1024, Math.floor(Math.log(maxGridValue) / Math.log(1024)));
+gridValue *= Math.pow(10, Math.floor(Math.log(maxGridValue / gridValue) / Math.log(10)));
+if (gridValue * 5 <= maxGridValue)
+gridValue *= 5;
+gridY = Math.round(height - gridValue * yScaleFactor - 0.5) + 0.5;
+context.beginPath();
+context.lineWidth = 1;
+context.strokeStyle = "rgba(0, 0, 0, 0.2)";
+context.moveTo(0, gridY);
+context.lineTo(width, gridY);
+context.stroke();
+context.closePath();
+}
+
+
+function drawBarCallback(x, size)
+{
+context.moveTo(x, height - 1);
+context.lineTo(x, Math.round(height - size * yScaleFactor - 1));
+}
+
+context.beginPath();
+context.lineWidth = 2;
+context.strokeStyle = "rgba(192, 192, 192, 0.6)";
+aggregateAndCall(topSizes, drawBarCallback);
+context.stroke();
+context.closePath();
+
+context.beginPath();
+context.lineWidth = 2;
+context.strokeStyle = "rgba(0, 0, 192, 0.8)";
+aggregateAndCall(sizes, drawBarCallback);
+context.stroke();
+context.closePath();
+
+if (gridValue) {
+var label = Number.bytesToString(gridValue);
+var labelPadding = 4;
+var labelX = 0;
+var labelY = gridY - 0.5;
+var labelWidth = 2 * labelPadding + context.measureText(label).width;
+context.beginPath();
+context.textBaseline = "bottom";
+context.font = "10px " + window.getComputedStyle(this.element, null).getPropertyValue("font-family");
+context.fillStyle = "rgba(255, 255, 255, 0.75)";
+context.fillRect(labelX, labelY - gridLabelHeight, labelWidth, gridLabelHeight);
+context.fillStyle = "rgb(64, 64, 64)";
+context.fillText(label, labelX + labelPadding, labelY);
+context.fill();
+context.closePath();
+}
+},
+
+onResize: function()
+{
+this._updateOverviewCanvas = true;
+this._scheduleUpdate();
+},
+
+_onWindowChanged: function()
+{
+if (!this._updateGridTimerId)
+this._updateGridTimerId = setTimeout(this._updateGrid.bind(this), 10);
+},
+
+_scheduleUpdate: function()
+{
+if (this._updateTimerId)
+return;
+this._updateTimerId = setTimeout(this.update.bind(this), 10);
+},
+
+_updateBoundaries: function()
+{
+this._windowLeft = this._overviewGrid.windowLeft();
+this._windowRight = this._overviewGrid.windowRight();
+this._windowWidth = this._windowRight - this._windowLeft;
+},
+
+update: function()
+{
+this._updateTimerId = null;
+if (!this.isShowing())
+return;
+this._updateBoundaries();
+this._overviewCalculator._updateBoundaries(this);
+this._overviewGrid.updateDividers(this._overviewCalculator);
+this._drawOverviewCanvas(this._overviewContainer.clientWidth, this._overviewContainer.clientHeight - 20);
+},
+
+_updateGrid: function()
+{
+this._updateGridTimerId = 0;
+this._updateBoundaries();
+var ids = this._profileSamples.ids;
+var timestamps = this._profileSamples.timestamps;
+var sizes = this._profileSamples.sizes;
+var startTime = timestamps[0];
+var totalTime = this._profileSamples.totalTime;
+var timeLeft = startTime + totalTime * this._windowLeft;
+var timeRight = startTime + totalTime * this._windowRight;
+var minId = 0;
+var maxId = ids[ids.length - 1] + 1;
+var size = 0;
+for (var i = 0; i < timestamps.length; ++i) {
+if (!timestamps[i])
+continue;
+if (timestamps[i] > timeRight)
+break;
+maxId = ids[i];
+if (timestamps[i] < timeLeft) {
+minId = ids[i];
+continue;
+}
+size += sizes[i];
+}
+
+this.dispatchEventToListeners(WebInspector.HeapTrackingOverviewGrid.IdsRangeChanged, {minId: minId, maxId: maxId, size: size});
+},
+
+__proto__: WebInspector.View.prototype
+}
+
+
+
+WebInspector.HeapTrackingOverviewGrid.SmoothScale = function()
+{
+this._lastUpdate = 0;
+this._currentScale = 0.0;
+}
+
+WebInspector.HeapTrackingOverviewGrid.SmoothScale.prototype = {
+
+nextScale: function(target) {
+target = target || this._currentScale;
+if (this._currentScale) {
+var now = Date.now();
+var timeDeltaMs = now - this._lastUpdate;
+this._lastUpdate = now;
+var maxChangePerSec = 20;
+var maxChangePerDelta = Math.pow(maxChangePerSec, timeDeltaMs / 1000);
+var scaleChange = target / this._currentScale;
+this._currentScale *= Number.constrain(scaleChange, 1 / maxChangePerDelta, maxChangePerDelta);
+} else
+this._currentScale = target;
+return this._currentScale;
+}
+}
+
+
+
+WebInspector.HeapTrackingOverviewGrid.OverviewCalculator = function()
+{
+}
+
+WebInspector.HeapTrackingOverviewGrid.OverviewCalculator.prototype = {
+
+_updateBoundaries: function(chart)
+{
+this._minimumBoundaries = 0;
+this._maximumBoundaries = chart._profileSamples.totalTime;
+this._xScaleFactor = chart._overviewContainer.clientWidth / this._maximumBoundaries;
+},
+
+
+computePosition: function(time)
+{
+return (time - this._minimumBoundaries) * this._xScaleFactor;
+},
+
+formatTime: function(value)
+{
+return Number.secondsToString((value + this._minimumBoundaries) / 1000);
+},
+
+maximumBoundary: function()
+{
+return this._maximumBoundaries;
+},
+
+minimumBoundary: function()
+{
+return this._minimumBoundaries;
+},
+
+zeroTime: function()
+{
+return this._minimumBoundaries;
+},
+
+boundarySpan: function()
+{
+return this._maximumBoundaries - this._minimumBoundaries;
 }
 }
 ;
@@ -10237,6 +10883,7 @@ var decorationElement = profileType.decorationElement();
 if (decorationElement)
 this._innerContentElement.appendChild(decorationElement);
 this._isInstantProfile = profileType.isInstantProfile();
+this._isEnabled = profileType.isEnabled();
 },
 
 _controlButtonClicked: function()
@@ -10246,6 +10893,10 @@ this._panel.toggleRecordButton();
 
 _updateControls: function()
 {
+if (this._isEnabled)
+this._controlButton.removeAttribute("disabled");
+else
+this._controlButton.setAttribute("disabled", "");
 if (this._isInstantProfile) {
 this._controlButton.removeStyleClass("running");
 this._controlButton.textContent = WebInspector.UIString("Take Snapshot");
@@ -10267,6 +10918,14 @@ this._updateControls();
 profileFinished: function()
 {
 this._isProfiling = false;
+this._updateControls();
+},
+
+
+updateProfileType: function(profileType)
+{
+this._isInstantProfile = profileType.isInstantProfile();
+this._isEnabled = profileType.isEnabled();
 this._updateControls();
 },
 
@@ -10335,6 +10994,7 @@ _profileTypeChanged: function(profileType, event)
 {
 this.dispatchEventToListeners(WebInspector.MultiProfileLauncherView.EventTypes.ProfileTypeSelected, profileType);
 this._isInstantProfile = profileType.isInstantProfile();
+this._isEnabled = profileType.isEnabled();
 this._updateControls();
 },
 
@@ -10832,9 +11492,11 @@ groupHasDrawCall = true;
 
 _createCallNode: function(index, call)
 {
+var callViewElement = document.createElement("div");
+
 var data = {};
 data[0] = index + 1;
-data[1] = call.functionName || "context." + call.property;
+data[1] = callViewElement;
 data[2] = "";
 if (call.sourceURL) {
 
@@ -10843,22 +11505,52 @@ var columnNumber = Math.max(0, call.columnNumber - 1) || 0;
 data[2] = this._linkifier.linkifyLocation(call.sourceURL, lineNumber, columnNumber);
 }
 
-if (call.arguments) {
-var args = call.arguments.map(function(argument) {
-return argument.description;
-});
-data[1] += "(" + args.join(", ") + ")";
-} else
-data[1] += " = " + call.value.description;
+callViewElement.createChild("span", "canvas-function-name").textContent = call.functionName || "context." + call.property;
 
-if (typeof call.result !== "undefined")
-data[1] += " => " + call.result.description;
+if (call.arguments) {
+callViewElement.createTextChild("(");
+for (var i = 0, n = call.arguments.length; i < n; ++i) {
+var argument = call.arguments[i];
+if (i)
+callViewElement.createTextChild(", ");
+this._createCallArgumentChild(callViewElement, argument).argumentIndex = i;
+}
+callViewElement.createTextChild(")");
+} else if (typeof call.value !== "undefined") {
+callViewElement.createTextChild(" = ");
+this._createCallArgumentChild(callViewElement, call.value);
+}
+
+if (typeof call.result !== "undefined") {
+callViewElement.createTextChild(" => ");
+this._createCallArgumentChild(callViewElement, call.result);
+}
 
 var node = new WebInspector.DataGridNode(data);
 node.index = index;
 node.selectable = true;
 node.call = call;
 return node;
+},
+
+
+_createCallArgumentChild: function(parentElement, callArgument)
+{
+var element = parentElement.createChild("span", "canvas-call-argument");
+if (callArgument.type === "string") {
+element.createTextChild("\"");
+element.createChild("span", "canvas-formatted-string").textContent = callArgument.description.trimMiddle(150);
+element.createTextChild("\"");
+} else {
+if (callArgument.subtype || callArgument.type)
+element.addStyleClass("canvas-formatted-" + (callArgument.subtype || callArgument.type));
+element.textContent = callArgument.description;
+}
+if (callArgument.resourceId) {
+element.addStyleClass("canvas-formatted-resource");
+element.resourceId = callArgument.resourceId;
+}
+return element;
 },
 
 _flattenSingleFrameNode: function()
@@ -10901,20 +11593,12 @@ WebInspector.runtimeModel.contextLists().forEach(this._addFrame, this);
 WebInspector.runtimeModel.addEventListener(WebInspector.RuntimeModel.Events.FrameExecutionContextListAdded, this._frameAdded, this);
 WebInspector.runtimeModel.addEventListener(WebInspector.RuntimeModel.Events.FrameExecutionContextListRemoved, this._frameRemoved, this);
 
-this._decorationElement = document.createElement("div");
-this._decorationElement.className = "profile-canvas-decoration hidden";
-this._decorationElement.createChild("div", "warning-icon-small");
-this._decorationElement.appendChild(document.createTextNode(WebInspector.UIString("There is an uninstrumented canvas on the page. Reload the page to instrument it.")));
-var reloadPageButton = this._decorationElement.createChild("button");
-reloadPageButton.type = "button";
-reloadPageButton.textContent = WebInspector.UIString("Reload");
-reloadPageButton.addEventListener("click", this._onReloadPageButtonClick.bind(this), false);
-
 this._dispatcher = new WebInspector.CanvasDispatcher(this);
+this._canvasAgentEnabled = false;
 
-
-CanvasAgent.enable(this._updateDecorationElement.bind(this));
-WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.MainFrameNavigated, this._updateDecorationElement, this);
+this._decorationElement = document.createElement("div");
+this._decorationElement.className = "profile-canvas-decoration";
+this._updateDecorationElement();
 }
 
 WebInspector.CanvasProfileType.TypeId = "CANVAS_PROFILE";
@@ -10936,6 +11620,8 @@ return this._recording ? WebInspector.UIString("Stop capturing canvas frames.") 
 
 buttonClicked: function()
 {
+if (!this._canvasAgentEnabled)
+return false;
 if (this._recording) {
 this._recording = false;
 this._stopFrameCapturing();
@@ -11036,21 +11722,55 @@ createProfile: function(profile)
 return new WebInspector.CanvasProfileHeader(this, profile.title, -1);
 },
 
-_updateDecorationElement: function()
-{
 
-function callback(error, result)
+_updateDecorationElement: function(forcePageReload)
 {
-var hideWarning = (error || !result);
-this._decorationElement.enableStyleClass("hidden", hideWarning);
+this._decorationElement.removeChildren();
+this._decorationElement.createChild("div", "warning-icon-small");
+this._decorationElement.appendChild(document.createTextNode(this._canvasAgentEnabled ? WebInspector.UIString("Canvas Profiler is enabled.") : WebInspector.UIString("Canvas Profiler is disabled.")));
+var button = this._decorationElement.createChild("button");
+button.type = "button";
+button.textContent = this._canvasAgentEnabled ? WebInspector.UIString("Disable") : WebInspector.UIString("Enable");
+button.addEventListener("click", this._onProfilerEnableButtonClick.bind(this, !this._canvasAgentEnabled), false);
+
+if (forcePageReload) {
+if (this._canvasAgentEnabled) {
+
+function hasUninstrumentedCanvasesCallback(error, result)
+{
+if (error || result)
+PageAgent.reload();
 }
-CanvasAgent.hasUninstrumentedCanvases(callback.bind(this));
+CanvasAgent.hasUninstrumentedCanvases(hasUninstrumentedCanvasesCallback.bind(this));
+} else {
+for (var frameId in this._framesWithCanvases) {
+if (this._framesWithCanvases.hasOwnProperty(frameId)) {
+PageAgent.reload();
+break;
+}
+}
+}
+}
 },
 
 
-_onReloadPageButtonClick: function(event)
+_onProfilerEnableButtonClick: function(enable)
 {
-PageAgent.reload(event.shiftKey);
+if (this._canvasAgentEnabled === enable)
+return;
+
+function callback(error)
+{
+if (error)
+return;
+this._canvasAgentEnabled = enable;
+this._updateDecorationElement(true);
+this._dispatchViewUpdatedEvent();
+}
+if (enable)
+CanvasAgent.enable(callback.bind(this));
+else
+CanvasAgent.disable(callback.bind(this));
 },
 
 
@@ -11140,6 +11860,18 @@ _dispatchViewUpdatedEvent: function()
 {
 this._frameSelector.element.enableStyleClass("hidden", this._frameSelector.size() <= 1);
 this.dispatchEventToListeners(WebInspector.ProfileType.Events.ViewUpdated);
+},
+
+
+isInstantProfile: function()
+{
+return this._isSingleFrameMode();
+},
+
+
+isEnabled: function()
+{
+return this._canvasAgentEnabled;
 },
 
 __proto__: WebInspector.ProfileType.prototype

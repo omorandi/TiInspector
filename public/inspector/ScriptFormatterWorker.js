@@ -65,7 +65,7 @@ if (tokenType === "javascript-ident") {
 previousIdentifier = tokenValue;
 if (tokenValue && previousToken === "function") {
 
-currentFunction = { line: i, name: tokenValue };
+currentFunction = { line: i, column: column, name: tokenValue };
 addedFunction = true;
 previousIdentifier = null;
 }
@@ -74,7 +74,7 @@ if (tokenValue === "function") {
 if (previousIdentifier && (previousToken === "=" || previousToken === ":")) {
 
 
-currentFunction = { line: i, name: previousIdentifier };
+currentFunction = { line: i, column: column, name: previousIdentifier };
 addedFunction = true;
 previousIdentifier = null;
 }

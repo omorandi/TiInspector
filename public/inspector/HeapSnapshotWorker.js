@@ -2848,10 +2848,11 @@ this._delegate.onTransferFinished();
 WebInspector.createFileSelectorElement = function(callback) {
 var fileSelectorElement = document.createElement("input");
 fileSelectorElement.type = "file";
+fileSelectorElement.style.display = "none";
 fileSelectorElement.setAttribute("tabindex", -1);
-fileSelectorElement.style.zIndex = -1;
-fileSelectorElement.style.position = "absolute";
-fileSelectorElement.onchange = function(event) {
+fileSelectorElement.onchange = onChange;
+function onChange(event)
+{
 callback(fileSelectorElement.files[0]);
 };
 return fileSelectorElement;
@@ -2952,11 +2953,11 @@ return true;
 
 Object.values = function(obj)
 {
-var keys = Object.keys(obj);
-var result = [];
+var result = Object.keys(obj);
+var length = result.length;
 
-for (var i = 0; i < keys.length; ++i)
-result.push(obj[keys[i]]);
+for (var i = 0; i < length; ++i)
+result[i] = obj[result[i]];
 return result;
 }
 
@@ -3100,6 +3101,15 @@ num = min;
 else if (num > max)
 num = max;
 return num;
+}
+
+
+Number.toFixedIfFloating = function(value)
+{
+if (!value || isNaN(value))
+return value;
+var number = Number(value);
+return number % 1 ? number.toFixed(3) : String(number);
 }
 
 Date.prototype.toISO8601Compact = function()
@@ -3315,18 +3325,24 @@ return this[this.length - 1];
 });
 
 
-function insertionIndexForObjectInListSortedByFunction(anObject, aList, aFunction)
+function insertionIndexForObjectInListSortedByFunction(anObject, aList, aFunction, insertionIndexAfter)
 {
 var index = binarySearch(anObject, aList, aFunction);
-if (index < 0)
+if (index < 0) {
 
 return -index - 1;
-else {
+}
+
+if (!insertionIndexAfter) {
 
 while (index > 0 && aFunction(anObject, aList[index - 1]) === 0)
 index--;
 return index;
 }
+
+while (index < aList.length && aFunction(anObject, aList[index]) === 0)
+index++;
+return index;
 }
 
 
@@ -3590,7 +3606,9 @@ remove: function(item)
 if (this._set[item.__identifier]) {
 --this._size;
 delete this._set[item.__identifier];
+return true;
 }
+return false;
 },
 
 
@@ -3606,7 +3624,7 @@ return result;
 
 hasItem: function(item)
 {
-return this._set[item.__identifier];
+return !!this._set[item.__identifier];
 },
 
 
@@ -3660,6 +3678,7 @@ keys: function()
 return this._list(0);
 },
 
+
 values: function()
 {
 return this._list(1);
@@ -3689,6 +3708,7 @@ var entry = this._map[key.__identifier];
 return !!entry;
 },
 
+
 size: function()
 {
 return this._size;
@@ -3700,6 +3720,104 @@ this._map = {};
 this._size = 0;
 }
 }
+
+
+var StringMap = function()
+{
+this._map = {};
+this._size = 0;
+}
+
+StringMap.prototype = {
+
+put: function(key, value)
+{
+if (key === "__proto__") {
+if (!this._hasProtoKey) {
+++this._size;
+this._hasProtoKey = true;
+}
+this._protoValue = value;
+return;
+}
+if (!Object.prototype.hasOwnProperty.call(this._map, key))
+++this._size;
+this._map[key] = value;
+},
+
+
+remove: function(key)
+{
+var result;
+if (key === "__proto__") {
+if (!this._hasProtoKey)
+return undefined;
+--this._size;
+delete this._hasProtoKey;
+result = this._protoValue;
+delete this._protoValue;
+return result;
+}
+if (!Object.prototype.hasOwnProperty.call(this._map, key))
+return undefined;
+--this._size;
+result = this._map[key];
+delete this._map[key];
+return result;
+},
+
+
+keys: function()
+{
+var result = Object.keys(this._map);
+if (this._hasProtoKey)
+result.push("__proto__");
+return result;
+},
+
+
+values: function()
+{
+var result = Object.values(this._map);
+if (this._hasProtoKey)
+result.push(this._protoValue);
+return result;
+},
+
+
+get: function(key)
+{
+if (key === "__proto__")
+return this._protoValue;
+if (!Object.prototype.hasOwnProperty.call(this._map, key))
+return undefined;
+return this._map[key];
+},
+
+
+contains: function(key)
+{
+var result;
+if (key === "__proto__")
+return this._hasProtoKey;
+return Object.prototype.hasOwnProperty.call(this._map, key);
+},
+
+
+size: function()
+{
+return this._size;
+},
+
+clear: function()
+{
+this._map = {};
+this._size = 0;
+delete this._hasProtoKey;
+delete this._protoValue;
+}
+}
+
 
 function loadXHR(url, async, callback) 
 {
@@ -3793,10 +3911,47 @@ xhr.send(null);
 if (!xhr.responseText)
 throw "empty response arrived for script '" + scriptName + "'";
 var sourceURL = WebInspector.ParsedURL.completeURL(window.location.href, scriptName); 
-window.eval(xhr.responseText + "\n//@ sourceURL=" + sourceURL);
+window.eval(xhr.responseText + "\n//# sourceURL=" + sourceURL);
 }
 
 var loadScript = importScript;
+
+
+function CallbackBarrier()
+{
+this._pendingIncomingCallbacksCount = 0;
+}
+
+CallbackBarrier.prototype = {
+
+createCallback: function(userCallback)
+{
+console.assert(!this._outgoingCallback, "CallbackBarrier.createCallback() is called after CallbackBarrier.callWhenDone()");
+++this._pendingIncomingCallbacksCount;
+return this._incomingCallback.bind(this, userCallback);
+},
+
+
+callWhenDone: function(callback)
+{
+console.assert(!this._outgoingCallback, "CallbackBarrier.callWhenDone() is called multiple times");
+this._outgoingCallback = callback;
+if (!this._pendingIncomingCallbacksCount)
+this._outgoingCallback();
+},
+
+_incomingCallback: function(userCallback)
+{
+console.assert(this._pendingIncomingCallbacksCount > 0);
+if (userCallback) {
+var args = Array.prototype.slice.call(arguments, 1);
+userCallback.apply(null, args);
+}
+if (!--this._pendingIncomingCallbacksCount && this._outgoingCallback)
+this._outgoingCallback();
+}
+}
+
 ;
 
 function postMessageWrapper(message)

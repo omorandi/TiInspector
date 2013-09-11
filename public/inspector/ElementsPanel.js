@@ -670,7 +670,7 @@ this._linkifier = linkifier;
 WebInspector.PropertiesSection.call(this, title);
 
 
-this.propertiesElement.parentNode.removeChild(this.propertiesElement);
+this.propertiesElement.remove();
 delete this.propertiesElement;
 delete this.propertiesTreeOutline;
 
@@ -903,6 +903,7 @@ value = "\u2012";
 else if (name === "position" && value === "auto")
 value = "\u2012";
 value = value.replace(/px$/, "");
+value = Number.toFixedIfFloating(value);
 
 var element = document.createElement("div");
 element.className = side;
@@ -921,7 +922,7 @@ var paddingBox = self._getBox(style, "padding");
 width = width - borderBox.left - borderBox.right - paddingBox.left - paddingBox.right;
 }
 
-return width;
+return Number.toFixedIfFloating(width);
 }
 
 function getContentAreaHeightPx(style)
@@ -934,7 +935,7 @@ var paddingBox = self._getBox(style, "padding");
 height = height - borderBox.top - borderBox.bottom - paddingBox.top - paddingBox.bottom;
 }
 
-return height;
+return Number.toFixedIfFloating(height);
 }
 
 
@@ -1320,11 +1321,16 @@ this.bodyElement.appendChild(this._sectionsContainer);
 this._spectrumHelper = new WebInspector.SpectrumPopupHelper();
 this._linkifier = new WebInspector.Linkifier(new WebInspector.Linkifier.DefaultCSSFormatter());
 
+WebInspector.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, this._styleSheetOrMediaQueryResultChanged, this);
+WebInspector.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetRemoved, this._styleSheetOrMediaQueryResultChanged, this);
 WebInspector.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetChanged, this._styleSheetOrMediaQueryResultChanged, this);
 WebInspector.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.MediaQueryResultChanged, this._styleSheetOrMediaQueryResultChanged, this);
 WebInspector.domAgent.addEventListener(WebInspector.DOMAgent.Events.AttrModified, this._attributeChanged, this);
 WebInspector.domAgent.addEventListener(WebInspector.DOMAgent.Events.AttrRemoved, this._attributeChanged, this);
 WebInspector.settings.showUserAgentStyles.addChangeListener(this._showUserAgentStylesSettingChanged.bind(this));
+this.element.addEventListener("mousemove", this._mouseMovedOverElement.bind(this), false);
+document.body.addEventListener("keydown", this._keyDown.bind(this), false);
+document.body.addEventListener("keyup", this._keyUp.bind(this), false);
 }
 
 
@@ -1345,6 +1351,9 @@ WebInspector.StylesSidebarPane.PseudoIdNames = [
 "-webkit-resizer", "-webkit-inner-spin-button", "-webkit-outer-spin-button"
 ];
 
+WebInspector.StylesSidebarPane._colorRegex = /((?:rgb|hsl)a?\([^)]+\)|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|\b\w+\b(?!-))/g;
+
+
 WebInspector.StylesSidebarPane.canonicalPropertyName = function(name)
 {
 if (!name || name.length < 9 || name.charAt(0) !== "-")
@@ -1355,12 +1364,67 @@ return name;
 return match[1];
 }
 
-WebInspector.StylesSidebarPane.createExclamationMark = function(propertyName)
+
+WebInspector.StylesSidebarPane.createExclamationMark = function(property)
 {
 var exclamationElement = document.createElement("div");
-exclamationElement.className = "exclamation-mark warning-icon-small";
-exclamationElement.title = WebInspector.CSSMetadata.cssPropertiesMetainfo.keySet()[propertyName.toLowerCase()] ? WebInspector.UIString("Invalid property value.") : WebInspector.UIString("Unknown property name.");
+exclamationElement.className = "exclamation-mark" + (WebInspector.StylesSidebarPane._ignoreErrorsForProperty(property) ? "" : " warning-icon-small");
+exclamationElement.title = WebInspector.CSSMetadata.cssPropertiesMetainfo.keySet()[property.name.toLowerCase()] ? WebInspector.UIString("Invalid property value.") : WebInspector.UIString("Unknown property name.");
 return exclamationElement;
+}
+
+
+WebInspector.StylesSidebarPane._colorFormat = function(color)
+{
+const cf = WebInspector.Color.Format;
+var format;
+var formatSetting = WebInspector.settings.colorFormat.get();
+if (formatSetting === cf.Original)
+format = cf.Original;
+else if (formatSetting === cf.RGB)
+format = (color.hasAlpha() ? cf.RGBA : cf.RGB);
+else if (formatSetting === cf.HSL)
+format = (color.hasAlpha() ? cf.HSLA : cf.HSL);
+else if (!color.hasAlpha())
+format = (color.canBeShortHex() ? cf.ShortHEX : cf.HEX);
+else
+format = cf.RGBA;
+
+return format;
+}
+
+
+WebInspector.StylesSidebarPane._ignoreErrorsForProperty = function(property) {
+function hasUnknownVendorPrefix(string)
+{
+return !string.startsWith("-webkit-") && /^[-_][\w\d]+-\w/.test(string);
+}
+
+var name = property.name.toLowerCase();
+
+
+if (name.charAt(0) === "_")
+return true;
+
+
+if (name === "filter")
+return true;
+
+
+if (name.startsWith("scrollbar-"))
+return true;
+if (hasUnknownVendorPrefix(name))
+return true;
+
+var value = property.value.toLowerCase();
+
+
+if (value.endsWith("\9"))
+return true;
+if (hasUnknownVendorPrefix(value))
+return true;
+
+return false;
 }
 
 WebInspector.StylesSidebarPane.prototype = {
@@ -1397,6 +1461,7 @@ inputs[i].checked = nodePseudoState.indexOf(inputs[i].state) >= 0;
 update: function(node, forceUpdate)
 {
 this._spectrumHelper.hide();
+this._discardElementUnderMouse();
 
 var refresh = false;
 
@@ -1604,7 +1669,7 @@ styleRules.push(entry);
 
 for (var j = pseudoElementCSSRules.rules.length - 1; j >= 0; --j) {
 var rule = pseudoElementCSSRules.rules[j];
-styleRules.push({ style: rule.style, selectorText: rule.selectorText, media: rule.media, sourceURL: rule.sourceURL, rule: rule, editable: !!(rule.style && rule.style.id) });
+styleRules.push({ style: rule.style, selectorText: rule.selectorText, media: rule.media, sourceURL: rule.resourceURL(), rule: rule, editable: !!(rule.style && rule.style.id) });
 }
 usedProperties = {};
 this._markUsedProperties(styleRules, usedProperties);
@@ -1672,7 +1737,7 @@ if ((rule.isUser || rule.isUserAgent) && !addedAttributesStyle) {
 addedAttributesStyle = true;
 addAttributesStyle();
 }
-styleRules.push({ style: rule.style, selectorText: rule.selectorText, media: rule.media, sourceURL: rule.sourceURL, rule: rule, editable: !!(rule.style && rule.style.id) });
+styleRules.push({ style: rule.style, selectorText: rule.selectorText, media: rule.media, sourceURL: rule.resourceURL(), rule: rule, editable: !!(rule.style && rule.style.id) });
 }
 
 if (!addedAttributesStyle)
@@ -1714,7 +1779,7 @@ if (!separatorInserted) {
 insertInheritedNodeSeparator(parentNode);
 separatorInserted = true;
 }
-styleRules.push({ style: rule.style, selectorText: rule.selectorText, media: rule.media, sourceURL: rule.sourceURL, rule: rule, isInherited: true, parentNode: parentNode, editable: !!(rule.style && rule.style.id) });
+styleRules.push({ style: rule.style, selectorText: rule.selectorText, media: rule.media, sourceURL: rule.resourceURL(), rule: rule, isInherited: true, parentNode: parentNode, editable: !!(rule.style && rule.style.id) });
 }
 parentNode = parentNode.parentNode;
 }
@@ -1908,8 +1973,7 @@ var index = sections.indexOf(section);
 if (index === -1)
 continue;
 sections.splice(index, 1);
-if (section.element.parentNode)
-section.element.parentNode.removeChild(section.element);
+section.element.remove();
 }
 },
 
@@ -1979,6 +2043,40 @@ this._rebuildUpdate();
 willHide: function()
 {
 this._spectrumHelper.hide();
+this._discardElementUnderMouse();
+},
+
+_discardElementUnderMouse: function()
+{
+if (this._elementUnderMouse)
+this._elementUnderMouse.removeStyleClass("styles-panel-hovered");
+delete this._elementUnderMouse;
+},
+
+_mouseMovedOverElement: function(e)
+{
+if (this._elementUnderMouse && e.target !== this._elementUnderMouse)
+this._discardElementUnderMouse();
+this._elementUnderMouse = e.target;
+if (WebInspector.KeyboardShortcut.eventHasCtrlOrMeta(e))
+this._elementUnderMouse.addStyleClass("styles-panel-hovered");
+},
+
+_keyDown: function(e)
+{
+if ((!WebInspector.isMac() && e.keyCode === WebInspector.KeyboardShortcut.Keys.Ctrl.code) ||
+(WebInspector.isMac() && e.keyCode === WebInspector.KeyboardShortcut.Keys.Meta.code)) {
+if (this._elementUnderMouse)
+this._elementUnderMouse.addStyleClass("styles-panel-hovered");
+}
+},
+
+_keyUp: function(e)
+{
+if ((!WebInspector.isMac() && e.keyCode === WebInspector.KeyboardShortcut.Keys.Ctrl.code) ||
+(WebInspector.isMac() && e.keyCode === WebInspector.KeyboardShortcut.Keys.Meta.code)) {
+this._discardElementUnderMouse();
+}
 },
 
 __proto__: WebInspector.SidebarPane.prototype
@@ -2039,6 +2137,12 @@ this.element.className = "styles-section matched-styles monospace" + (isFirstSec
 
 this.propertiesElement.removeStyleClass("properties-tree");
 
+this._parentPane = parentPane;
+this.styleRule = styleRule;
+this.rule = this.styleRule.rule;
+this.editable = editable;
+this.isInherited = isInherited;
+
 if (styleRule.media) {
 for (var i = styleRule.media.length - 1; i >= 0; --i) {
 var media = styleRule.media[i];
@@ -2059,8 +2163,25 @@ break;
 
 if (media.sourceURL) {
 var refElement = mediaDataElement.createChild("div", "subtitle");
-var lineNumber = media.sourceLine < 0 ? undefined : media.sourceLine;
-var anchor = WebInspector.linkifyResourceAsNode(media.sourceURL, lineNumber, "subtitle", media.sourceURL + (isNaN(lineNumber) ? "" : (":" + (lineNumber + 1))));
+var rawLocation;
+var mediaHeader;
+if (media.range) {
+mediaHeader = media.header();
+if (mediaHeader) {
+var lineNumber = media.lineNumberInSource();
+var columnNumber = media.columnNumberInSource();
+console.assert(typeof lineNumber !== "undefined" && typeof columnNumber !== "undefined");
+rawLocation = new WebInspector.CSSLocation(media.sourceURL, lineNumber, columnNumber);
+}
+}
+
+var anchor;
+if (rawLocation)
+anchor = this._parentPane._linkifier.linkifyCSSLocation(mediaHeader.id, rawLocation);
+else {
+
+anchor = WebInspector.linkifyResourceAsNode(media.sourceURL, undefined, "subtitle", media.sourceURL);
+}
 anchor.preferredPanel = "scripts";
 anchor.style.float = "right";
 refElement.appendChild(anchor);
@@ -2091,12 +2212,6 @@ this._selectorElement.addEventListener("click", this._handleSelectorClick.bind(t
 this.element.addEventListener("mousedown", this._handleEmptySpaceMouseDown.bind(this), false);
 this.element.addEventListener("click", this._handleEmptySpaceClick.bind(this), false);
 
-this._parentPane = parentPane;
-this.styleRule = styleRule;
-this.rule = this.styleRule.rule;
-this.editable = editable;
-this.isInherited = isInherited;
-
 if (this.rule) {
 
 if (this.rule.isUserAgent || this.rule.isUser)
@@ -2104,7 +2219,7 @@ this.editable = false;
 else {
 
 if (this.rule.id)
-this.navigable = this.rule.isSourceNavigable();
+this.navigable = !!this.rule.resourceURL();
 }
 this.titleElement.addStyleClass("styles-selector");
 }
@@ -2391,25 +2506,18 @@ return link;
 }
 
 if (this.styleRule.sourceURL)
-return this._parentPane._linkifier.linkifyCSSRuleLocation(this.rule) || linkifyUncopyable(this.styleRule.sourceURL, this.rule.sourceLine);
+return this._parentPane._linkifier.linkifyCSSLocation(this.rule.id.styleSheetId, this.rule.rawLocation) || linkifyUncopyable(this.styleRule.sourceURL, this.rule.lineNumberInSource());
 
 if (!this.rule)
 return document.createTextNode("");
 
-var origin = "";
 if (this.rule.isUserAgent)
 return document.createTextNode(WebInspector.UIString("user agent stylesheet"));
 if (this.rule.isUser)
 return document.createTextNode(WebInspector.UIString("user stylesheet"));
-if (this.rule.isViaInspector) {
-var element = document.createElement("span");
-var resource = WebInspector.cssModel.viaInspectorResourceForRule(this.rule);
-if (resource)
-element.appendChild(linkifyUncopyable(resource.url, this.rule.sourceLine));
-else
-element.textContent = WebInspector.UIString("via inspector");
-return element;
-}
+if (this.rule.isViaInspector)
+return document.createTextNode(WebInspector.UIString("via inspector"));
+return document.createTextNode("");
 },
 
 _handleEmptySpaceMouseDown: function(event)
@@ -2523,7 +2631,7 @@ this.element.removeStyleClass("no-affect");
 }
 
 this.rule = newRule;
-this.styleRule = { section: this, style: newRule.style, selectorText: newRule.selectorText, media: newRule.media, sourceURL: newRule.sourceURL, rule: newRule };
+this.styleRule = { section: this, style: newRule.style, selectorText: newRule.selectorText, media: newRule.media, sourceURL: newRule.resourceURL(), rule: newRule };
 
 this._parentPane.update(selectedNode);
 
@@ -2647,7 +2755,9 @@ if (property.inactive || section.isPropertyOverloaded(property.name))
 childElement.listItemElement.addStyleClass("overloaded");
 if (!property.parsedOk) {
 childElement.listItemElement.addStyleClass("not-parsed-ok");
-childElement.listItemElement.insertBefore(WebInspector.StylesSidebarPane.createExclamationMark(property.name), childElement.listItemElement.firstChild);
+childElement.listItemElement.insertBefore(WebInspector.StylesSidebarPane.createExclamationMark(property), childElement.listItemElement.firstChild);
+if (WebInspector.StylesSidebarPane._ignoreErrorsForProperty(property))
+childElement.listItemElement.addStyleClass("has-ignorable-error");
 }
 }
 }
@@ -2691,7 +2801,7 @@ return;
 
 function successCallback(newRule, doesSelectorAffectSelectedNode)
 {
-var styleRule = { section: this, style: newRule.style, selectorText: newRule.selectorText, sourceURL: newRule.sourceURL, rule: newRule };
+var styleRule = { section: this, style: newRule.style, selectorText: newRule.selectorText, sourceURL: newRule.resourceURL(), rule: newRule };
 this.makeNormal(styleRule);
 
 if (!doesSelectorAffectSelectedNode) {
@@ -2770,6 +2880,11 @@ return null;
 get inherited()
 {
 return this._inherited;
+},
+
+hasIgnorableError: function()
+{
+return !this.parsedOk && WebInspector.StylesSidebarPane._ignoreErrorsForProperty(this.property);
 },
 
 set inherited(x)
@@ -2920,7 +3035,7 @@ var color = WebInspector.Color.parse(text);
 if (!color)
 return document.createTextNode(text);
 
-var format = getFormat();
+var format = WebInspector.StylesSidebarPane._colorFormat(color);
 var spectrumHelper = self.editablePane() && self.editablePane()._spectrumHelper;
 var spectrum = spectrumHelper ? spectrumHelper.spectrum() : null;
 
@@ -2982,24 +3097,6 @@ console.error("Unable to handle color picker scrolling");
 }
 }
 e.consume(true);
-}
-
-function getFormat()
-{
-var format;
-var formatSetting = WebInspector.settings.colorFormat.get();
-if (formatSetting === cf.Original)
-format = cf.Original;
-else if (formatSetting === cf.RGB)
-format = (color.hasAlpha() ? cf.RGBA : cf.RGB);
-else if (formatSetting === cf.HSL)
-format = (color.hasAlpha() ? cf.HSLA : cf.HSL);
-else if (!color.hasAlpha())
-format = (color.canBeShortHex() ? cf.ShortHEX : cf.HEX);
-else
-format = cf.RGBA;
-
-return format;
 }
 
 var colorValueElement = document.createElement("span");
@@ -3064,10 +3161,9 @@ container.appendChild(colorValueElement);
 return container;
 }
 
-var colorRegex = /((?:rgb|hsl)a?\([^)]+\)|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|\b\w+\b(?!-))/g;
-var colorProcessor = processValue.bind(window, colorRegex, processColor, null);
+var colorProcessor = processValue.bind(window, WebInspector.StylesSidebarPane._colorRegex, processColor, null);
 
-valueElement.appendChild(processValue(/url\(\s*([^)]+)\s*\)/g, linkifyURL.bind(this), WebInspector.CSSMetadata.isColorAwareProperty(self.name) ? colorProcessor : null, value));
+valueElement.appendChild(processValue(/url\(\s*([^)]+)\s*\)/g, linkifyURL.bind(this), WebInspector.CSSMetadata.isColorAwareProperty(self.name) && self.parsedOk ? colorProcessor : null, value));
 }
 
 this.listItemElement.removeChildren();
@@ -3089,7 +3185,7 @@ this.hasChildren = false;
 this.listItemElement.addStyleClass("not-parsed-ok");
 
 
-this.listItemElement.insertBefore(WebInspector.StylesSidebarPane.createExclamationMark(this.property.name), this.listItemElement.firstChild);
+this.listItemElement.insertBefore(WebInspector.StylesSidebarPane.createExclamationMark(this.property), this.listItemElement.firstChild);
 }
 if (this.property.inactive)
 this.listItemElement.addStyleClass("inactive");
@@ -3100,10 +3196,15 @@ updateState: function()
 if (!this.listItemElement)
 return;
 
-if (this.style.isPropertyImplicit(this.name) || this.value === "initial")
+if (this.style.isPropertyImplicit(this.name))
 this.listItemElement.addStyleClass("implicit");
 else
 this.listItemElement.removeStyleClass("implicit");
+
+if (this.hasIgnorableError())
+this.listItemElement.addStyleClass("has-ignorable-error");
+else
+this.listItemElement.removeStyleClass("has-ignorable-error");
 
 if (this.inherited)
 this.listItemElement.addStyleClass("inherited");
@@ -3324,7 +3425,7 @@ var propertyNameClicked = element === this.nameElement;
 var uiLocation = this.property.uiLocation(propertyNameClicked);
 if (!uiLocation)
 return;
-WebInspector.showPanel("scripts").showUISourceCode(uiLocation.uiSourceCode, uiLocation.lineNumber);
+WebInspector.showPanel("scripts").showUISourceCode(uiLocation.uiSourceCode, uiLocation.lineNumber, uiLocation.columnNumber);
 },
 
 _isNameElement: function(element)
@@ -3362,7 +3463,21 @@ if (selectElement !== this.valueElement) {
 selectElement = this.valueElement;
 }
 
-this.valueElement.textContent = this.value;
+this.valueElement.textContent = (!this._newProperty && WebInspector.CSSMetadata.isColorAwareProperty(this.name)) ? formatColors(this.value) : this.value;
+}
+
+
+function formatColors(value)
+{
+var result = [];
+var items = value.replace(WebInspector.StylesSidebarPane._colorRegex, "\0$1\0").split("\0");
+for (var i = 0; i < items.length; ++i) {
+var color = WebInspector.Color.parse(items[i]);
+
+
+result.push(color ? color.toString(WebInspector.StylesSidebarPane._colorFormat(color)) : items[i]);
+}
+return result.join("");
 }
 
 if (WebInspector.isBeingEdited(selectElement))
@@ -3613,12 +3728,16 @@ if (blankInput || (this._newProperty && /^\s*$/.test(this.valueElement.textConte
 propertyText = "";
 else {
 if (isEditingName)
-propertyText = userInput + ": " + this.valueElement.textContent;
+propertyText = userInput + ": " + this.property.value;
 else
-propertyText = this.nameElement.textContent + ": " + userInput;
+propertyText = this.property.name + ": " + userInput;
 }
 this.applyStyleText(propertyText, true, true, false);
 } else {
+if (isEditingName)
+this.property.name = userInput;
+else
+this.property.value = userInput;
 if (!isDataPasted && !this._newProperty)
 this.updateTitle();
 moveToNextCallback.call(this, this._newProperty, false, section);
@@ -3809,6 +3928,12 @@ event.preventDefault();
 return;
 }
 break;
+case "Enter":
+if (this.autoCompleteElement && !this.autoCompleteElement.textContent.length) {
+this.tabKeyPressed();
+return;
+}
+break;
 }
 
 WebInspector.TextPrompt.prototype.onKeyDown.call(this, event);
@@ -3938,7 +4063,7 @@ WebInspector.domAgent.addEventListener(WebInspector.DOMAgent.Events.AttrModified
 WebInspector.domAgent.addEventListener(WebInspector.DOMAgent.Events.AttrRemoved, this._updateBreadcrumbIfNeeded, this);
 WebInspector.domAgent.addEventListener(WebInspector.DOMAgent.Events.NodeRemoved, this._nodeRemoved, this);
 WebInspector.domAgent.addEventListener(WebInspector.DOMAgent.Events.DocumentUpdated, this._documentUpdatedEvent, this);
-WebInspector.domAgent.addEventListener(WebInspector.DOMAgent.Events.InspectElementRequested, this._inspectElementRequested, this);
+WebInspector.settings.showShadowDOM.addChangeListener(this._showShadowDOMChanged.bind(this));
 
 if (WebInspector.domAgent.existingDocument())
 this._documentUpdated(WebInspector.domAgent.existingDocument());
@@ -4857,12 +4982,6 @@ sidebarResized: function(event)
 this.treeOutline.updateSelection();
 },
 
-_inspectElementRequested: function(event)
-{
-var node = event.data;
-this.revealAndSelectNode(node.id);
-},
-
 revealAndSelectNode: function(nodeId)
 {
 WebInspector.inspectorView.setCurrentPanel(this);
@@ -4870,6 +4989,9 @@ WebInspector.inspectorView.setCurrentPanel(this);
 var node = WebInspector.domAgent.nodeForId(nodeId);
 if (!node)
 return;
+
+while (!WebInspector.ElementsTreeOutline.showShadowDOM() && node && node.isInShadowTree())
+node = node.parentNode;
 
 WebInspector.domAgent.highlightDOMNodeForTwoSeconds(nodeId);
 this.selectDOMNode(node, true);
@@ -4909,6 +5031,11 @@ _dockSideChanged: function()
 var dockSide = WebInspector.dockController.dockSide();
 var vertically = dockSide === WebInspector.DockController.State.DockedToRight && WebInspector.settings.splitVerticallyWhenDockedToRight.get();
 this._splitVertically(vertically);
+},
+
+_showShadowDOMChanged: function()
+{
+this.treeOutline.update();
 },
 
 

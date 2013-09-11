@@ -958,6 +958,7 @@ ScheduleStyleRecalculation: "ScheduleStyleRecalculation",
 RecalculateStyles: "RecalculateStyles",
 InvalidateLayout: "InvalidateLayout",
 Layout: "Layout",
+PaintSetup: "PaintSetup",
 Paint: "Paint",
 Rasterize: "Rasterize",
 ScrollLayer: "ScrollLayer",
@@ -1406,16 +1407,21 @@ setMode: function(newMode)
 {
 if (this._currentMode === newMode)
 return;
+var windowTimes;
+if (this._overviewControl)
+windowTimes = this._overviewControl.windowTimes(this.windowLeft(), this.windowRight());
 this._innerSetMode(newMode);
 this.dispatchEventToListeners(WebInspector.TimelineOverviewPane.Events.ModeChanged, this._currentMode);
+if (windowTimes && windowTimes.startTime >= 0)
+this.setWindowTimes(windowTimes.startTime, windowTimes.endTime);
 this._update();
 },
 
 _innerSetMode: function(newMode)
 {
+var windowTimes;
 if (this._overviewControl)
 this._overviewControl.detach();
-
 this._currentMode = newMode;
 this._overviewControl = this._createOverviewControl();
 this._overviewControl.show(this._overviewGrid.element);
@@ -1517,6 +1523,7 @@ this._windowStartTime = 0;
 this._windowEndTime = Infinity;
 this._overviewCalculator.reset();
 this._overviewGrid.reset();
+this._overviewGrid.setResizeEnabled(false);
 this._eventDividers = [];
 this._overviewGrid.updateDividers(this._overviewCalculator);
 this._overviewControl.reset();
@@ -1554,21 +1561,19 @@ this.dispatchEventToListeners(WebInspector.TimelineOverviewPane.Events.WindowCha
 },
 
 
-setWindowTimes: function(left, right)
+setWindowTimes: function(startTime, endTime)
 {
-this._windowStartTime = left;
-this._windowEndTime = right;
+this._windowStartTime = startTime;
+this._windowEndTime = endTime;
 this._updateWindow();
 },
 
 _updateWindow: function()
 {
-var offset = this._model.minimumRecordTime();
-var timeSpan = this._model.maximumRecordTime() - offset;
-var left = this._windowStartTime ? (this._windowStartTime - offset) / timeSpan : 0;
-var right = this._windowEndTime < Infinity ? (this._windowEndTime - offset) / timeSpan : 1;
+var windowBoundaries = this._overviewControl.windowBoundaries(this._windowStartTime, this._windowEndTime);
 this._ignoreWindowChangedEvent = true;
-this._overviewGrid.setWindow(left, right);
+this._overviewGrid.setWindow(windowBoundaries.left, windowBoundaries.right);
+this._overviewGrid.setResizeEnabled(this._model.records.length);
 this._ignoreWindowChangedEvent = false;
 },
 
@@ -1672,11 +1677,23 @@ addFrame: function(frame) { },
 windowTimes: function(windowLeft, windowRight)
 {
 var absoluteMin = this._model.minimumRecordTime();
-var absoluteMax = this._model.maximumRecordTime();
+var timeSpan = this._model.maximumRecordTime() - absoluteMin;
 return {
-startTime: absoluteMin + (absoluteMax - absoluteMin) * windowLeft,
-endTime: absoluteMin + (absoluteMax - absoluteMin) * windowRight
+startTime: absoluteMin + timeSpan * windowLeft,
+endTime: absoluteMin + timeSpan * windowRight
 };
+},
+
+
+windowBoundaries: function(startTime, endTime)
+{
+var absoluteMin = this._model.minimumRecordTime();
+var timeSpan = this._model.maximumRecordTime() - absoluteMin;
+var haveRecords = absoluteMin >= 0;
+return {
+left: haveRecords && startTime ? Math.min((startTime - absoluteMin) / timeSpan, 1) : 0,
+right: haveRecords && endTime < Infinity ? (endTime - absoluteMin) / timeSpan : 1
+}
 },
 
 _resetCanvas: function()
@@ -1711,7 +1728,7 @@ const lowerOffset = 3;
 var maxUsedHeapSize = 0;
 var minUsedHeapSize = 100000000000;
 var minTime = this._model.minimumRecordTime();
-var maxTime = this._model.maximumRecordTime();;
+var maxTime = this._model.maximumRecordTime();
 WebInspector.TimelinePresentationModel.forAllRecords(records, function(r) {
 maxUsedHeapSize = Math.max(maxUsedHeapSize, r.usedHeapSize || maxUsedHeapSize);
 minUsedHeapSize = Math.min(minUsedHeapSize, r.usedHeapSize || minUsedHeapSize);
@@ -1859,10 +1876,7 @@ const innerStripHeight = height - 2 * stripPadding;
 
 var x = begin + 0.5;
 var y = category.overviewStripGroupIndex * height + stripPadding + 0.5;
-
-
-var skiaAssertWorkaroundTweak = 0.01;
-var width = Math.max(end - begin, 1) + skiaAssertWorkaroundTweak;
+var width = Math.max(end - begin, 1);
 
 this._context.save();
 this._context.translate(x, y);
@@ -2002,40 +2016,40 @@ const fpsMarks = [30, 60];
 
 this._context.save();
 this._context.beginPath();
-this._context.font = 9 * window.devicePixelRatio + "px monospace";
+this._context.font = (10 * window.devicePixelRatio) + "px " + window.getComputedStyle(this.element, null).getPropertyValue("font-family");
 this._context.textAlign = "right";
-this._context.textBaseline = "top";
+this._context.textBaseline = "alphabetic";
 
-const labelPadding = 2 * window.devicePixelRatio;
+const labelPadding = 4 * window.devicePixelRatio;
+const baselineHeight = 3 * window.devicePixelRatio;
 var lineHeight = 12 * window.devicePixelRatio;
 var labelTopMargin = 0;
+var labelOffsetY = 0; 
 
 for (var i = 0; i < fpsMarks.length; ++i) {
 var fps = fpsMarks[i];
 
 var y = this._canvas.height - Math.floor(1.0 / fps * scale) - 0.5;
-var label = fps + " FPS ";
-var labelWidth = this._context.measureText(label).width;
+var label = WebInspector.UIString("%d\u2009fps", fps);
+var labelWidth = this._context.measureText(label).width + 2 * labelPadding;
 var labelX = this._canvas.width;
-var labelY;
 
-if (labelTopMargin < y - lineHeight)
-labelY = y - lineHeight;
-else if (y + lineHeight < this._canvas.height)
-labelY = y;
-else
+if (!i && labelTopMargin < y - lineHeight)
+labelOffsetY = -lineHeight; 
+var labelY = y + labelOffsetY;
+if (labelY < labelTopMargin || labelY + lineHeight > this._canvas.height)
 break; 
 
 this._context.moveTo(0, y);
 this._context.lineTo(this._canvas.width, y);
 
-this._context.fillStyle = "rgba(255, 255, 255, 0.75)";
-this._context.fillRect(labelX - labelWidth - labelPadding, labelY, labelWidth + 2 * labelPadding, lineHeight);
-this._context.fillStyle = "rgb(0, 0, 0)";
-this._context.fillText(label, labelX, labelY);
+this._context.fillStyle = "rgba(255, 255, 255, 0.5)";
+this._context.fillRect(labelX - labelWidth, labelY, labelWidth, lineHeight);
+this._context.fillStyle = "black";
+this._context.fillText(label, labelX - labelPadding, labelY + lineHeight - baselineHeight);
 labelTopMargin = labelY + lineHeight;
 }
-this._context.strokeStyle = "rgb(0, 0, 0, 0.3)";
+this._context.strokeStyle = "rgba(128, 128, 128, 0.5)";
 this._context.stroke();
 this._context.restore();
 },
@@ -2084,19 +2098,61 @@ this._context.lineTo(x + width, y1);
 this._context.stroke();
 },
 
+
 windowTimes: function(windowLeft, windowRight)
 {
-var windowSpan = this.element.clientWidth;
+if (!this._barTimes.length)
+return WebInspector.TimelineOverviewBase.prototype.windowTimes.call(this, windowLeft, windowRight);
+var windowSpan = this._canvas.width;
 var leftOffset = windowLeft * windowSpan - this._outerPadding + this._actualPadding;
 var rightOffset = windowRight * windowSpan - this._outerPadding;
-var bars = this.element.children;
 var firstBar = Math.floor(Math.max(leftOffset, 0) / this._actualOuterBarWidth);
 var lastBar = Math.min(Math.floor(rightOffset / this._actualOuterBarWidth), this._barTimes.length - 1);
+if (firstBar >= this._barTimes.length)
+return {startTime: Infinity, endTime: Infinity};
+
 const snapToRightTolerancePixels = 3;
 return {
-startTime: firstBar >= this._barTimes.length ? Infinity : this._barTimes[firstBar].startTime,
-endTime: rightOffset + snapToRightTolerancePixels > windowSpan ? Infinity : this._barTimes[lastBar].endTime
+startTime: this._barTimes[firstBar].startTime,
+endTime: (rightOffset + snapToRightTolerancePixels > windowSpan) || (lastBar >= this._barTimes.length) ? Infinity : this._barTimes[lastBar].endTime
 }
+},
+
+
+windowBoundaries: function(startTime, endTime)
+{
+function barStartComparator(time, barTime)
+{
+return time - barTime.startTime;
+}
+function barEndComparator(time, barTime)
+{
+
+if (time === barTime.endTime)
+return 1;
+return time - barTime.endTime;
+}
+return {
+left: this._windowBoundaryFromTime(startTime, barEndComparator),
+right: this._windowBoundaryFromTime(endTime, barStartComparator)
+}
+},
+
+
+_windowBoundaryFromTime: function(time, comparator)
+{
+if (time === Infinity)
+return 1;
+var index = this._firstBarAfter(time, comparator);
+if (!index)
+return 0;
+return (this._barNumberToScreenPosition(index) - this._actualPadding / 2) / this._canvas.width;
+},
+
+
+_firstBarAfter: function(time, comparator)
+{
+return insertionIndexForObjectInListSortedByFunction(time, this._barTimes, comparator);
 },
 
 __proto__: WebInspector.TimelineOverviewBase.prototype
@@ -2159,6 +2215,7 @@ recordStyles[recordTypes.ScheduleStyleRecalculation] = { title: WebInspector.UIS
 recordStyles[recordTypes.RecalculateStyles] = { title: WebInspector.UIString("Recalculate Style"), category: categories["rendering"] };
 recordStyles[recordTypes.InvalidateLayout] = { title: WebInspector.UIString("Invalidate Layout"), category: categories["rendering"] };
 recordStyles[recordTypes.Layout] = { title: WebInspector.UIString("Layout"), category: categories["rendering"] };
+recordStyles[recordTypes.PaintSetup] = { title: WebInspector.UIString("Paint Setup"), category: categories["painting"] };
 recordStyles[recordTypes.Paint] = { title: WebInspector.UIString("Paint"), category: categories["painting"] };
 recordStyles[recordTypes.Rasterize] = { title: WebInspector.UIString("Rasterize"), category: categories["painting"] };
 recordStyles[recordTypes.ScrollLayer] = { title: WebInspector.UIString("Scroll"), category: categories["rendering"] };
@@ -2381,7 +2438,6 @@ origin = parentRecord;
 parentRecord = newParentRecord;
 }
 
-var coalescingBucket;
 if (parentRecord === this._rootRecord)
 coalescingBucket = record.thread ? record.type : "mainThread";
 var coalescedRecord = this._findCoalescedParent(record, parentRecord, coalescingBucket);
@@ -2466,11 +2522,15 @@ if (lastRecord && lastRecord.coalesced)
 lastRecord = lastRecord.children.peekLast();
 var startTime = WebInspector.TimelineModel.startTimeInSeconds(record);
 var endTime = WebInspector.TimelineModel.endTimeInSeconds(record);
-if (!lastRecord || lastRecord.type !== record.type)
+if (!lastRecord)
+return null;
+if (lastRecord.type !== record.type)
 return null;
 if (lastRecord.endTime + coalescingThresholdSeconds < startTime)
 return null;
 if (endTime + coalescingThresholdSeconds < lastRecord.startTime)
+return null;
+if (WebInspector.TimelinePresentationModel.coalescingKeyForRecord(record) !== WebInspector.TimelinePresentationModel.coalescingKeyForRecord(lastRecord._record))
 return null;
 if (lastRecord.parent.coalesced)
 return lastRecord.parent;
@@ -2488,6 +2548,9 @@ data: { }
 };
 if (record._record.thread)
 rawRecord.thread = "aggregated";
+if (record.type === WebInspector.TimelineModel.RecordType.TimeStamp)
+rawRecord.data.message = record.data.message;
+
 var coalescedRecord = new WebInspector.TimelinePresentationModel.Record(this, rawRecord, null, null, null, false);
 var parent = record.parent;
 
@@ -2667,8 +2730,12 @@ this._selfTime = this.endTime - this.startTime;
 this._lastChildEndTime = this.endTime;
 this._startTimeOffset = this.startTime - presentationModel._minimumRecordTime;
 
-if (record.data && record.data["url"])
+if (record.data) {
+if (record.data["url"])
 this.url = record.data["url"];
+if (record.data["layerRootNode"])
+this._relatedBackendNodeId = record.data["layerRootNode"];
+}
 if (scriptDetails) {
 this.scriptName = scriptDetails.scriptName;
 this.scriptLine = scriptDetails.scriptLine;
@@ -2798,6 +2865,7 @@ if (this.stackTrace)
 this.setHasWarning();
 presentationModel._layoutInvalidateStack[this.frameId] = null;
 this.highlightQuad = record.data.root || WebInspector.TimelinePresentationModel.quadFromRectData(record.data);
+this._relatedBackendNodeId = record.data["rootNode"];
 break;
 
 case recordTypes.Paint:
@@ -2974,14 +3042,34 @@ return this.startTime <= time && time <= this.endTime;
 
 generatePopupContent: function(callback)
 {
-if (WebInspector.TimelinePresentationModel.needsPreviewElement(this.type))
-WebInspector.DOMPresentationUtils.buildImagePreviewContents(this.url, false, this._generatePopupContentWithImagePreview.bind(this, callback));
-else
-this._generatePopupContentWithImagePreview(callback);
+var barrier = new CallbackBarrier();
+if (WebInspector.TimelinePresentationModel.needsPreviewElement(this.type) && !this._imagePreviewElement)
+WebInspector.DOMPresentationUtils.buildImagePreviewContents(this.url, false, barrier.createCallback(this._setImagePreviewElement.bind(this)));
+if (this._relatedBackendNodeId && !this._relatedNode)
+WebInspector.domAgent.pushNodeByBackendIdToFrontend(this._relatedBackendNodeId, barrier.createCallback(this._setRelatedNode.bind(this)));
+
+barrier.callWhenDone(callbackWrapper.bind(this));
+function callbackWrapper()
+{
+callback(this._generatePopupContentSynchronously());
+}
 },
 
 
-_generatePopupContentWithImagePreview: function(callback, previewElement)
+_setImagePreviewElement: function(element)
+{
+this._imagePreviewElement = element;
+},
+
+
+_setRelatedNode: function(nodeId)
+{
+if (typeof nodeId === "number")
+this._relatedNode = WebInspector.domAgent.nodeForId(nodeId);
+},
+
+
+_generatePopupContentSynchronously: function()
 {
 var contentHelper = new WebInspector.PopoverContentHelper(this.title);
 var text = WebInspector.UIString("%s (at %s)", Number.secondsToString(this._lastChildEndTime - this.startTime, true),
@@ -2996,10 +3084,9 @@ contentHelper.appendElementRow(WebInspector.UIString("Aggregated Time"),
 WebInspector.TimelinePresentationModel._generateAggregatedInfo(this._aggregatedStats));
 }
 
-if (this.coalesced) {
-callback(contentHelper.contentTable());
-return;
-}
+if (this.coalesced)
+return contentHelper.contentTable();
+
 const recordTypes = WebInspector.TimelineModel.RecordType;
 
 
@@ -3035,8 +3122,8 @@ case recordTypes.ResourceReceiveResponse:
 case recordTypes.ResourceReceivedData:
 case recordTypes.ResourceFinish:
 contentHelper.appendElementRow(WebInspector.UIString("Resource"), WebInspector.linkifyResourceAsNode(this.url));
-if (previewElement)
-contentHelper.appendElementRow(WebInspector.UIString("Preview"), previewElement);
+if (this._imagePreviewElement)
+contentHelper.appendElementRow(WebInspector.UIString("Preview"), this._imagePreviewElement);
 if (this.data["requestMethod"])
 contentHelper.appendTextRow(WebInspector.UIString("Request Method"), this.data["requestMethod"]);
 if (typeof this.data["statusCode"] === "number")
@@ -3064,6 +3151,12 @@ contentHelper.appendTextRow(WebInspector.UIString("Location"), WebInspector.UISt
 if (typeof this.data["width"] !== "undefined" && typeof this.data["height"] !== "undefined")
 contentHelper.appendTextRow(WebInspector.UIString("Dimensions"), WebInspector.UIString("%d\u2009\u00d7\u2009%d", this.data["width"], this.data["height"]));
 }
+
+
+case recordTypes.PaintSetup:
+case recordTypes.Rasterize:
+if (this._relatedNode)
+contentHelper.appendElementRow(WebInspector.UIString("Layer root"), this._createNodeAnchor(this._relatedNode));
 break;
 case recordTypes.RecalculateStyles: 
 if (this.data["elementCount"])
@@ -3084,6 +3177,8 @@ if (this.stackTrace) {
 callStackLabel = WebInspector.UIString("Layout forced");
 contentHelper.appendTextRow(WebInspector.UIString("Note"), WebInspector.UIString("Forced synchronous layout is a possible performance bottleneck."));
 }
+if (this._relatedNode)
+contentHelper.appendElementRow(WebInspector.UIString("Layout root"), this._createNodeAnchor(this._relatedNode));
 break;
 case recordTypes.Time:
 case recordTypes.TimeEnd:
@@ -3126,7 +3221,21 @@ contentHelper.appendStackTrace(callSiteStackTraceLabel || WebInspector.UIString(
 if (this.stackTrace)
 contentHelper.appendStackTrace(callStackLabel || WebInspector.UIString("Call Stack"), this.stackTrace, this._linkifyCallFrame.bind(this));
 
-callback(contentHelper.contentTable());
+return contentHelper.contentTable();
+},
+
+
+_createNodeAnchor: function(node)
+{
+var span = document.createElement("span");
+span.classList.add("node-link");
+span.addEventListener("click", onClick, false);
+WebInspector.DOMPresentationUtils.decorateNodeLabel(node, span);
+function onClick()
+{
+WebInspector.showPanel("elements").revealAndSelectNode(node.id);
+}
+return span;
 },
 
 _refreshDetails: function()
@@ -3216,7 +3325,6 @@ details = WebInspector.displayNameForURL(this.url);
 break;
 case WebInspector.TimelineModel.RecordType.Time:
 case WebInspector.TimelineModel.RecordType.TimeEnd:
-case WebInspector.TimelineModel.RecordType.TimeStamp:
 details = this.data["message"];
 break;
 default:
@@ -3377,6 +3485,19 @@ return selector + " { background-image: -webkit-linear-gradient(" +
 category.fillColorStop0 + ", " + category.fillColorStop1 + " 25%, " + category.fillColorStop1 + " 25%, " + category.fillColorStop1 + ");" +
 " border-color: " + category.borderColor +
 "}";
+}
+
+
+
+WebInspector.TimelinePresentationModel.coalescingKeyForRecord = function(rawRecord)
+{
+var recordTypes = WebInspector.TimelineModel.RecordType;
+switch (rawRecord.type)
+{
+case recordTypes.EventDispatch: return rawRecord.data["type"];
+case recordTypes.TimeStamp: return rawRecord.data["message"];
+default: return null;
+}
 }
 
 
@@ -4138,7 +4259,7 @@ this._automaticallySizeWindow = false;
 var records = this._model.records;
 for (var i = 0; i < records.length; ++i)
 this._innerAddRecordToTimeline(records[i]);
-this._invalidateAndScheduleRefresh(false, true);
+this._invalidateAndScheduleRefresh(false, false);
 },
 
 _onTimelineEventRecorded: function(event)
@@ -4905,7 +5026,7 @@ WebInspector.highlightSearchResult(this.element, matchInfo.index, matchInfo[0].l
 
 dispose: function()
 {
-this.element.parentElement.removeChild(this.element);
+this.element.remove();
 }
 }
 
@@ -4977,7 +5098,7 @@ this._scheduleRefresh(false, true);
 
 dispose: function()
 {
-this.element.parentElement.removeChild(this.element);
+this.element.remove();
 this._expandElement._dispose();
 }
 }
@@ -5014,7 +5135,7 @@ this._element.addStyleClass("hidden");
 
 _dispose: function()
 {
-this._element.parentElement.removeChild(this._element);
+this._element.remove();
 }
 }
 

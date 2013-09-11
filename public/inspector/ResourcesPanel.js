@@ -433,12 +433,12 @@ _editingCallback: function(editingNode, columnIdentifier, oldText, newText)
 {
 var domStorage = this.domStorage;
 if ("key" === columnIdentifier) {
-if (oldText)
+if (typeof oldText === "string")
 domStorage.removeItem(oldText);
-domStorage.setItem(newText, editingNode.data.value);
+domStorage.setItem(newText, editingNode.data.value || '');
 this._removeDupes(editingNode);
 } else
-domStorage.setItem(editingNode.data.key, newText);
+domStorage.setItem(editingNode.data.key || '', newText);
 },
 
 
@@ -1589,7 +1589,7 @@ WebInspector.GoToLineDialog.install(this, viewGetter.bind(this));
 if (WebInspector.resourceTreeModel.cachedResourcesLoaded())
 this._cachedResourcesLoaded();
 
-WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.OnLoad, this._onLoadEventFired, this);
+WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.Load, this._loadEventFired, this);
 WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.CachedResourcesLoaded, this._cachedResourcesLoaded, this);
 WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.WillLoadCachedResources, this._resetWithFrames, this);
 
@@ -1620,7 +1620,7 @@ this._initialized = true;
 }
 },
 
-_onLoadEventFired: function()
+_loadEventFired: function()
 {
 this._initDefaultSelection();
 },
@@ -1872,7 +1872,7 @@ this.showResource(resource, anchor.lineNumber);
 },
 
 
-showResource: function(resource, line)
+showResource: function(resource, line, column)
 {
 var resourceTreeElement = this._findTreeElementForResource(resource);
 if (resourceTreeElement)
@@ -1880,8 +1880,8 @@ resourceTreeElement.revealAndSelect();
 
 if (typeof line === "number") {
 var view = this._resourceViewForResource(resource);
-if (view.canHighlightLine())
-view.highlightLine(line);
+if (view.canHighlightPosition())
+view.highlightPosition(line, column);
 }
 return true;
 },
@@ -2151,9 +2151,19 @@ this._resetSearchResults();
 var regex = WebInspector.SourceFrame.createSearchRegex(query);
 var totalMatchesCount = 0;
 
-function callback(error, result)
+
+function addMatchesToResource(resource, matchesCount)
 {
-if (!error) {
+this._findTreeElementForResource(resource).searchMatchesFound(matchesCount);
+totalMatchesCount += matchesCount;
+}
+
+
+function searchInResourcesCallback(error, result)
+{
+if (error)
+return;
+
 for (var i = 0; i < result.length; i++) {
 var searchResult = result[i];
 var frameTreeElement = this._treeElementForFrameId[searchResult.frameId];
@@ -2167,11 +2177,22 @@ var resource = frameTreeElement.resourceByURL(searchResult.url);
 if (!resource)
 continue;
 
-this._findTreeElementForResource(resource).searchMatchesFound(searchResult.matchesCount);
-totalMatchesCount += searchResult.matchesCount;
+addMatchesToResource.call(this, resource, searchResult.matchesCount)
 }
+if (!--callbacksLeft)
+searchFinished.call(this);
 }
 
+
+function searchInContentCallback(resource, result)
+{
+addMatchesToResource.call(this, resource, result.length);
+if (!--callbacksLeft)
+searchFinished.call(this);
+}
+
+function searchFinished()
+{
 WebInspector.searchController.updateSearchMatchesCount(totalMatchesCount, this);
 this._searchController = new WebInspector.ResourcesSearchController(this.resourcesListTreeElement, totalMatchesCount);
 
@@ -2179,7 +2200,13 @@ if (this.sidebarTree.selectedTreeElement && this.sidebarTree.selectedTreeElement
 this.jumpToNextSearchResult();
 }
 
-PageAgent.searchInResources(regex.source, !regex.ignoreCase, true, callback.bind(this));
+var frames = WebInspector.resourceTreeModel.frames();
+var callbacksLeft = 1 + frames.length;
+for (var i = 0; i < frames.length; ++i) {
+var mainResource = frames[i].mainResource;
+mainResource.searchInContent(regex.source, !regex.ignoreCase, true, searchInContentCallback.bind(this, mainResource));
+}
+PageAgent.searchInResources(regex.source, !regex.ignoreCase, true, searchInResourcesCallback.bind(this));
 },
 
 _ensureViewSearchPerformed: function(callback)

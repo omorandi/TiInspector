@@ -448,7 +448,7 @@ __proto__: WebInspector.AuditCategory.prototype
 WebInspector.AuditController = function(auditsPanel)
 {
 this._auditsPanel = auditsPanel;
-WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.OnLoad, this._didMainResourceLoad, this);
+WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.Load, this._didMainResourceLoad, this);
 }
 
 WebInspector.AuditController.prototype = {
@@ -1252,14 +1252,13 @@ return;
 if (!styleSheets.length)
 return callback(null);
 
-var pseudoSelectorRegexp = /:hover|:link|:active|:visited|:focus|:before|:after/;
 var selectors = [];
 var testedSelectors = {};
 for (var i = 0; i < styleSheets.length; ++i) {
 var styleSheet = styleSheets[i];
 for (var curRule = 0; curRule < styleSheet.rules.length; ++curRule) {
 var selectorText = styleSheet.rules[curRule].selectorText;
-if (selectorText.match(pseudoSelectorRegexp) || testedSelectors[selectorText])
+if (testedSelectors[selectorText])
 continue;
 selectors.push(selectorText);
 testedSelectors[selectorText] = 1;
@@ -1324,50 +1323,55 @@ boundSelectorsCallback(foundSelectors);
 }
 
 function documentLoaded(selectors, document) {
-for (var i = 0; i < selectors.length; ++i) {
-if (progress.isCanceled())
-return;
-WebInspector.domAgent.querySelector(document.id, selectors[i], queryCallback.bind(null, i === selectors.length - 1 ? selectorsCallback.bind(null, callback, styleSheets, testedSelectors) : null, selectors[i], styleSheets, testedSelectors));
+var pseudoSelectorRegexp = /::?(?:[\w-]+)(?:\(.*?\))?/g;
+                for (var i = 0; i < selectors.length; ++i) {
+                    if (progress.isCanceled())
+                        return;
+                    var effectiveSelector = selectors[i].replace(pseudoSelectorRegexp, "");
+                    WebInspector.domAgent.querySelector(document.id, effectiveSelector, queryCallback.bind(null, i === selectors.length - 1 ? selectorsCallback.bind(null, callback, styleSheets, testedSelectors) : null, selectors[i], styleSheets, testedSelectors));
+                }
+            }
+
+            WebInspector.domAgent.requestDocument(documentLoaded.bind(null, selectors));
+        }
+
+        function styleSheetCallback(styleSheets, sourceURL, continuation, styleSheet)
+        {
+            if (progress.isCanceled())
+                return;
+
+            if (styleSheet) {
+                styleSheet.sourceURL = sourceURL;
+                styleSheets.push(styleSheet);
+            }
+            if (continuation)
+                continuation(styleSheets);
+        }
+
+        function allStylesCallback(error, styleSheetInfos)
+        {
+            if (progress.isCanceled())
+                return;
+
+            if (error || !styleSheetInfos || !styleSheetInfos.length)
+                return evalCallback([]);
+            var styleSheets = [];
+            for (var i = 0; i < styleSheetInfos.length; ++i) {
+                var info = styleSheetInfos[i];
+                WebInspector.CSSStyleSheet.createForId(info.styleSheetId, styleSheetCallback.bind(null, styleSheets, info.sourceURL, i == styleSheetInfos.length - 1 ? evalCallback : null));
+            }
+        }
+
+        CSSAgent.getAllStyleSheets(allStylesCallback);
+    },
+
+    __proto__: WebInspector.AuditRule.prototype
 }
-}
 
-WebInspector.domAgent.requestDocument(documentLoaded.bind(null, selectors));
-}
-
-function styleSheetCallback(styleSheets, sourceURL, continuation, styleSheet)
-{
-if (progress.isCanceled())
-return;
-
-if (styleSheet) {
-styleSheet.sourceURL = sourceURL;
-styleSheets.push(styleSheet);
-}
-if (continuation)
-continuation(styleSheets);
-}
-
-function allStylesCallback(error, styleSheetInfos)
-{
-if (progress.isCanceled())
-return;
-
-if (error || !styleSheetInfos || !styleSheetInfos.length)
-return evalCallback([]);
-var styleSheets = [];
-for (var i = 0; i < styleSheetInfos.length; ++i) {
-var info = styleSheetInfos[i];
-WebInspector.CSSStyleSheet.createForId(info.styleSheetId, styleSheetCallback.bind(null, styleSheets, info.sourceURL, i == styleSheetInfos.length - 1 ? evalCallback : null));
-}
-}
-
-CSSAgent.getAllStyleSheets(allStylesCallback);
-},
-
-__proto__: WebInspector.AuditRule.prototype
-}
-
-
+/**
+* @constructor
+* @extends {WebInspector.AuditRule}
+*/
 WebInspector.AuditRules.CacheControlRule = function(id, name)
 {
 WebInspector.AuditRule.call(this, id, name);
@@ -2041,7 +2045,7 @@ this._styleSheetResult = result.addChild(rule.sourceURL ? WebInspector.linkifyRe
 if (!this._ruleResult) {
 var anchor = WebInspector.linkifyURLAsNode(rule.sourceURL, rule.selectorText);
 anchor.preferredPanel = "resources";
-anchor.lineNumber = rule.sourceLine;
+anchor.lineNumber = rule.lineNumberInSource();
 this._ruleResult = this._styleSheetResult.addChild(anchor);
 }
 ++result.violationCount;
