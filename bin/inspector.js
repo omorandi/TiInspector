@@ -14,7 +14,7 @@ var DTServer = require('../lib/devtools_server').DTServer,
 
 
 function usage() {
-  console.log('Usage: node-inspector [options] [tiprojectdir]');
+  console.log('Usage: ti-inspector [options] [tiprojectdir]');
   console.log('Options:');
   console.log('--web-host=[host]      host for the inspector server (default localhost)');
   console.log('--web-port=[port]      port for the inspector server (default 8080)');
