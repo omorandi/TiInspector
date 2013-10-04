@@ -114,6 +114,9 @@ If you don't like the already available themes, you can download one from [http:
 
 ## Changelog
 
+### 0.0.5
+* Fixed websocket errors in latest Chrome Version 30.0.1599.66 (issue #7)
+* Enabled console panel persistence across reloads (issue #3)
 
 ### 0.0.4
 
@@ -126,6 +129,10 @@ If you don't like the already available themes, you can download one from [http:
 
 * Automatic reload of the DevTools panel when a new debugging session is started: no need to go back and forth from the dashboard. Simply reload your app and Ti Inspector will restart
 * Basic support for Chrome DevTools custom themes (chose a theme in the `public/js/preferences.js` file and reload the web app in the browser)
+
+
+### Credits
+Ti Inspector was originally inspired by [node-inspector](https://github.com/node-inspector/node-inspector), started by (Danny Coates)[https://github.com/dannycoates]
 
 
 ## License
