@@ -55,13 +55,13 @@
                 $("#" + sessionId).remove();
             }
         });
-        
+
         var appview = new AppView();
 
 
 
 
-        var ws = new WebSocket("ws://" +  window.location.host, "webapp");
+        var ws = new WebSocket("ws://" +  window.location.host);
 
         var backendSessions = [];
 

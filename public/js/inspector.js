@@ -44,7 +44,7 @@
             activeSession = sessionId;
             var iframe = document.getElementById("devtools-frame");
             var url = devToolsUrl(sessionId);
-            iframe.contentWindow.location.replace(url); 
+            iframe.contentWindow.location.replace(url);
         }
 
         function changeWindowUrl(sessionId) {
@@ -57,7 +57,7 @@
 
         setDevToolsUrl(sessionId);
 
-        var ws = new WebSocket("ws://" +  window.location.host, "webapp");
+        var ws = new WebSocket("ws://" +  window.location.host);
 
         ws.onmessage = function (message) {
             var msg = JSON.parse(message.data);
