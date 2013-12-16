@@ -28,6 +28,7 @@ In alternative, if you like to stay on the edge, you can pull the code from gith
 ~~~
   $ git clone git@github.com:omorandi/TiInspector.git
   $ cd TiInspector
+  $ npm install
   $ [sudo] npm link
 ~~~
 
