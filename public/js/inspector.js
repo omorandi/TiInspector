@@ -22,13 +22,6 @@
             loadCssInIframe('/css/inspector-overrides.css');
         });
 
-        $('#alert').modal({
-            show: false,
-            keyboard: false,
-            backdrop: 'static'
-        });
-
-
         var sessionId = window.location.hash.replace('#', '');
 
         var activeSession = null;
@@ -63,7 +56,6 @@
             var msg = JSON.parse(message.data);
 
             if (msg.message == 'backendSessionDidStart') {
-                $('#alert').modal('hide');
                 var newSession = msg.data;
                 setDevToolsUrl(newSession.id);
                 changeWindowUrl(newSession.id);
@@ -71,7 +63,6 @@
             }
             if (msg.message == 'backendSessionDidStop') {
                 activeSession = null;
-                $('#alert').modal('show');
                 return;
             }
         };
