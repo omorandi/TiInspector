@@ -115,6 +115,10 @@ If you don't like the already available themes, you can download one from [http:
 
 ## Changelog
 
+### 0.1.0
+* Fixed issues caused by latest versions of Jade in the inspection dashboard
+* Fixed listing of platform-specific files (issue #16)
+
 ### 0.0.5
 * Fixed websocket errors in latest Chrome Version 30.0.1599.66 (issue #7)
 * Enabled console panel persistence across reloads (issue #3)

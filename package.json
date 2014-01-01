@@ -1,6 +1,6 @@
 {
   "name": "ti-inspector",
-  "version": "0.0.5",
+  "version": "0.1.0",
   "description": "Debug Appcelerator Titanium apps in Chrome DevTools",
   "repository": "",
   "keywords": [
@@ -23,6 +23,10 @@
   },
   "bin": {
     "ti-inspector": "bin/inspector.js"
+  },
+  "repository" : {
+    "type" : "git",
+    "url" : "http://github.com/omorandi/TiInspector.git"
   }
 
 }
