@@ -1,6 +1,6 @@
 {
   "name": "ti-inspector",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Debug Appcelerator Titanium apps in Chrome DevTools",
   "repository": "",
   "keywords": [

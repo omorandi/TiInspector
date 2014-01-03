@@ -115,6 +115,9 @@ If you don't like the already available themes, you can download one from [http:
 
 ## Changelog
 
+### 0.1.1
+* Fixed breakpoints handling in platform-specific files (full Ti 3.2.0 support)
+
 ### 0.1.0
 * Fixed issues caused by latest versions of Jade in the inspection dashboard
 * Fixed listing of platform-specific files (issue #16)
