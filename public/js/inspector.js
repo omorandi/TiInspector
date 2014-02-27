@@ -1,7 +1,6 @@
-(function() {
-    if (typeof TiInspector == "undefined") {
-        TiInspector = {};
-    }
+(function(TiInspector) {
+    /* jshint boss:true */
+    'use strict';
 
 
     TiInspector.loadInspector = function loadInspector() {
@@ -70,6 +69,7 @@
         ws.onclose = function() {
             changeWindowUrl(null);
         };
-    }
+    };
 
-}())
+})(TiInspector || (TiInspector = {}));
+/* vim:set ts=4 sw=4 et fdm=marker: */
