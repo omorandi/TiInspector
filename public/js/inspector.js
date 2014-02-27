@@ -155,7 +155,15 @@
         return this;
     };
 
-    // StylesConfig::toString {{{3
+    // StylesConfig::clear {{{3
+    StylesConfig.prototype.clear = function() {
+        this.unlinkAll();
+        this.styles = [];
+        setSavedStyles(this.styles);
+        return this;
+    };
+
+    // StylesConfig:toString {{{3
     StylesConfig.prototype.toString = function() {
         var styleUrls = this.styles.map(function(style) {
             return '' + style.url + (style.saved ? '' : ' (*)');
