@@ -114,16 +114,14 @@
     };
 
     // Instance methods {{{2
-    // StylesConfig::save {{{3
-    // Will save the list to localStorage and push new styles into the
-    // #devtools-frame head. It will only add links for styles marked as not
-    // saved (to prevent duplicates and avoid needless DOM queries. It uses a
-    // nextTick to defer DOM manipulations.
-    StylesConfig.prototype.save = function() {
+    // StylesConfig::link {{{3
+    // Will push new styles into the #devtools-frame head. It will only add
+    // links for styles marked as not saved (to prevent duplicates and avoid
+    // needless DOM queries. It uses a nextTick to defer DOM manipulations.
+    StylesConfig.prototype.link = function() {
         if (!this.pending) {
             this.pending = setTimeout(savePendingStyles_.bind(this), 0);
         }
-        setSavedStyles(this.styles);
         return this;
     };
 
@@ -131,7 +129,8 @@
     StylesConfig.prototype.add = function(url) {
         if (!url) { return; }
         this.styles.push({url: url});
-        return this;
+        setSavedStyles(this.styles);
+        return this.link();
     };
 
     // StylesConfig::remove {{{3
@@ -143,6 +142,7 @@
             this.styles.splice(index, 1);
             removeStyleLink(index);
         }
+        setSavedStyles(this.styles);
         return this;
     };
 
