@@ -175,21 +175,12 @@
 
     TiInspector.loadInspector = function loadInspector() {
 
-         function loadCssInIframe(url) {
-             if (!url) {
-                 return;
-             }
-
-             var iframe = document.getElementById("devtools-frame");
-             $(iframe.contentDocument.head).append('<link rel="stylesheet" type="text/css" href="' + url +'">');
-         }
-
+        if (TiInspector.preferences) {
+            TiInspector.preferences.styles = StylesConfig.getInstance();
+        }
 
         $('#devtools-frame').load(function() {
-            if (TiInspector.preferences) {
-                loadCssInIframe(TiInspector.preferences.devtools_theme);
-            }
-            loadCssInIframe('/css/inspector-overrides.css');
+            TiInspector.preferences.styles.save();
         });
 
         var sessionId = window.location.hash.replace('#', '');
