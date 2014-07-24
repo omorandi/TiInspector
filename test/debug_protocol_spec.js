@@ -1,5 +1,5 @@
-var Protocol = require('../lib/tidebugger/debug_protocol').Protocol,
-	ArgsDef = require('../lib/tidebugger/debug_protocol').ArgumentsDefinition,
+var Protocol = require('../lib/tidebugger/protocol').Protocol,
+	ArgsDef = require('../lib/tidebugger/protocol').ArgumentsDefinition,
 	_ = require('underscore');
 
 
@@ -130,7 +130,7 @@ describe('Message conversions', function() {
 				200,
 				1, //default state value
 				0, //default hitcount value
-				'', //default condition value 
+				'', //default condition value
 				1 //default value
 			]
 		});

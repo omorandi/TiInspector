@@ -21,6 +21,12 @@
     "winston": "0.7.X",
     "walk": "2.2.X"
   },
+  "devDependencies": {
+     "jasmine-node": "1.14.X"
+  },
+  "scripts": {
+    "test": "jasmine-node test"
+  },
   "bin": {
     "ti-inspector": "bin/inspector.js"
   },

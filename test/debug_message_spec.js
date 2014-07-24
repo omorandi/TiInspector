@@ -1,4 +1,4 @@
-var DbgMessage = require('../lib/tidebugger/debug_message');
+var DbgMessage = require('../lib/tidebugger/message');
 
 var msgBuilder = DbgMessage.builder;
 var msgParser = DbgMessage.parser;
