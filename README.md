@@ -4,12 +4,24 @@ Ti Inspector allows debugging Appcelerator Titanium applications in the Chrome D
 
 The tool acts as a gateway by translating commands and messages between the [Chrome DevTools Debugging Protocol](https://developers.google.com/chrome-developer-tools/docs/protocol/1.0/) and the [Titanium Debugger Protocol](http://docs.appcelerator.com/titanium/latest/#!/guide/Debugger_Protocol) (and vice-versa).
 
-Currently only the iOS target platform is supported. Android support requires more work and it will be added as soon as possible.
+Currently only the iOS target platform is supported.
 
 ##Motivation
 Since my Titanium development workflow mainly revolves around Sublime Text and the CLI, and firing up Titanium Studio for tracking down bugs in the integrated debugger is most of the time a painfully slow activity (start the IDE, rebuild for debugging, etc.), I wanted a more agile way to fire up a JavaScript debug session. Moreover, when debugging native modules in Xcode, sometimes it would be nice to have a view on both sides (JS and native) of the code.
 
 You can find a more detailed post and a short demo [here](http://titaniumninja.com/debugging-titanium-apps-with-chrome-devtools/)
+
+##NOTE - Titanium SDK 3.5.X
+
+Currently Ti Inspector doesn't work correctly with Ti SDK 3.5.X.
+Since the 3.5.0 release, Titanium underwent major changes regarding the JavaScriptCore engine and its debugger library (`libti_ios_debugger.a`).
+In particular, the currently known issues are:
+* [Does not recognize nor stops on breakpoints](https://github.com/omorandi/TiInspector/issues/25)
+* [Ti SDK 3.5.X: sudden app termination](https://github.com/omorandi/TiInspector/issues/26)
+
+The former is also seen in the Ti Studio debugger. Follow and watch [https://jira.appcelerator.org/browse/TIMOB-18616](https://jira.appcelerator.org/browse/TIMOB-18616) for additional info.
+
+While these issues are being worked on, as a temporary solution, Ti Inspector can be used by building the app with Ti SDK 3.4.1.GA during debugging
 
 ##Install
 
@@ -94,13 +106,13 @@ From there on, you can debug your application by setting breakpoints, stepping t
 
 ## Limitations
 
-* Android is not currently supported: supporting Android will mean implementing the [V8 remote debugging protocol](https://code.google.com/p/v8/wiki/DebuggerProtocol) in Ti Inspector. This is something I'll likely work on in the near future
+* Android is not currently supported: supporting Android will mean implementing the [V8 remote debugging protocol](https://code.google.com/p/v8/wiki/DebuggerProtocol) in Ti Inspector.
 * On device debugging is not supported since it's treated in a special way by the CLI and Studio, though there exist some hackish ways for enabling it in a semi-manual way
 * Expressions can only be evaluated when the execution is suspended
 * TiAlloy (and any other, e.g. CoffeeScript) source mapping is not supported
 * Multiple contexts (e.g. Ti.UI.Windows created through the `url` property) are not correctly handled
 
-## Themes FTW (available from V. 0.0.3)
+## Themes FTW (available from V. 0.0.3) - NOTE: NOT WORKING SINCE v0.1.2
 
 The DevTools app styling can be customized quite easily and some open source custom css are available from [http://devthemez.com/themes/chrome-developer-tools](http://devthemez.com/themes/chrome-developer-tools).
 These can also be used with Ti Inspector, which already includes some in the `public/themes/` directory.
@@ -114,6 +126,11 @@ If you don't like the already available themes, you can download one from [http:
 
 
 ## Changelog
+
+### 0.1.2
+* Upgraded devtools to latest Blink revision
+* Fixed breakpoint handling
+
 
 ### 0.1.1
 * Fixed breakpoints handling in platform-specific files (full Ti 3.2.0 support)
